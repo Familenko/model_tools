@@ -708,19 +708,23 @@ class classifier_choose():
 
         return self.build_pipe
 
-
     def voting(self,mode='hard'):
 
         from sklearn.ensemble import VotingClassifier
 
         voting_clf = VotingClassifier(
-            estimators=[('tree',tree),('random',random),('gradient',gradient),('logic',logic),('knn',knn),('svc',svc)],
+            estimators=[('tree',self.model_list[0]),('random',self.model_list[1]),('gradient',self.model_list[2]),
+            ('logic',self.model_list[3]),('knn',self.model_list[4]),('svc',self.model_list[5])],
             voting = mode)
 
         voting_clf.fit(self.X_train,self.y_train)
-        result_test_df(voting_clf)
+        return self.result_test_df(voting_clf)
 
     def result_test_df(self,model):
+
+        import pandas as pd
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+        from sklearn.model_selection import cross_validate
 
         y_pred = model.predict(self.X_test)
         accuracy = accuracy_score(self.y_test, y_pred)
