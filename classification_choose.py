@@ -142,20 +142,12 @@ class classifier_choose():
         from sklearn.svm import SVC
         from sklearn.tree import DecisionTreeClassifier
         from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from sklearn.neural_network import MLPClassifier
         from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
         from sklearn.model_selection import GridSearchCV
         from sklearn.model_selection import cross_validate
         import pandas as pd
 
         self.result_df = pd.DataFrame()
-
-        mlp = GridSearchCV(MLPClassifier(), cv=5, n_jobs=n_jobs,
-                            param_grid={
-                                'hidden_layer_sizes': [(100,10,1)],
-                                'activation': ['relu', 'tanh', 'logistic'],
-                                'learning_rate': ['constant', 'invscaling', 'adaptive'],
-                                'solver':['lbfgs', 'sgd', 'adam']})
 
         tree = GridSearchCV(DecisionTreeClassifier(),cv=cv,n_jobs=n_jobs,
                             param_grid = {
@@ -199,12 +191,11 @@ class classifier_choose():
             logic = GridSearchCV(LogisticRegression(),cv=cv,param_grid={},n_jobs=n_jobs)
             knn = GridSearchCV(KNeighborsClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)
             svc = GridSearchCV(SVC(),cv=cv,param_grid={},n_jobs=n_jobs)
-            mlp = GridSearchCV(MLPClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)
 
         if mode == 'classic' or mode == 'empty':
 
-            self.models = [mlp,tree,random,gradient,logic,knn,svc]
-            models_names = ['mlp','tree','random','gradient','logic','knn','svc']
+            self.models = [tree,random,gradient,logic,knn,svc]
+            models_names = ['tree','random','gradient','logic','knn','svc']
 
             for i in range(len(self.models)):
                 model = self.models[i]
@@ -252,9 +243,8 @@ class classifier_choose():
             logic = GridSearchCV(LogisticRegression(),cv=cv,param_grid = {**params},n_jobs=n_jobs)
             knn = GridSearchCV(KNeighborsClassifier(),cv=cv,param_grid={**params},n_jobs=n_jobs)
             svc = GridSearchCV(SVC(),cv=cv,param_grid={**params},n_jobs=n_jobs)
-            mlp = GridSearchCV(MLPClassifier(),cv=cv,param_grid={**params},n_jobs=n_jobs)
 
-            self.models = {'mlp':mlp,'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
+            self.models = {'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
             models_names = estimator
 
             model = self.models[estimator]
@@ -290,7 +280,7 @@ class classifier_choose():
 
         if mode == 'list':
 
-            self.models = {'mlp':mlp,'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
+            self.models = {'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
 
             for i in estimators:
                 model = self.models[i]
@@ -356,7 +346,6 @@ class classifier_choose():
         
         from sklearn.linear_model import LogisticRegression
         from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.neural_network import MLPClassifier
         from sklearn.svm import SVC
         from sklearn.tree import DecisionTreeClassifier
         from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -370,7 +359,7 @@ class classifier_choose():
         
         models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
                      'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
-                      'gradient':GradientBoostingClassifier(),'mlp':MLPClassifier(max_iter=1000)}
+                      'gradient':GradientBoostingClassifier()}
         
         result_rer = self.result_df
         result_rer = result_rer.reset_index()
@@ -453,7 +442,6 @@ class classifier_choose():
         from sklearn.linear_model import LogisticRegression
         from sklearn.neighbors import KNeighborsClassifier
         from sklearn.svm import SVC
-        from sklearn.neural_network import MLPClassifier
         from sklearn.tree import DecisionTreeClassifier
         from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
         from sklearn.model_selection import GridSearchCV
@@ -466,7 +454,7 @@ class classifier_choose():
         
         models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
                      'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
-                      'gradient':GradientBoostingClassifier(),'mlp':MLPClassifier()}
+                      'gradient':GradientBoostingClassifier()}
         
         if mode == 'auto':
 
@@ -719,3 +707,46 @@ class classifier_choose():
             self.build_pipe = make_pipeline(self.build_scaler,self.build_pca,self.ada)
 
         return self.build_pipe
+
+
+    def voting(self,mode='hard'):
+
+        from sklearn.ensemble import VotingClassifier
+
+        voting_clf = VotingClassifier(
+            estimators=[('tree',tree),('random',random),('gradient',gradient),('logic',logic),('knn',knn),('svc',svc)],
+            voting = mode)
+
+        voting_clf.fit(self.X_train,self.y_train)
+        result_test_df(voting_clf)
+
+    def result_test_df(self,model):
+
+        y_pred = model.predict(self.X_test)
+        accuracy = accuracy_score(self.y_test, y_pred)
+        precision = precision_score(self.y_test, y_pred, average='macro')
+        recall = recall_score(self.y_test, y_pred, average='macro')
+        f1 = f1_score(self.y_test, y_pred, average='macro')
+        
+        if len(self.y_check.unique())>1:
+
+            precision_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='precision_macro',cv=5)
+            accuracy_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='accuracy',cv=5)
+            recall_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='recall_macro',cv=5)
+            f1_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='f1_macro',cv=5)
+
+        else:
+
+            precision_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='precision',cv=5)
+            accuracy_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='accuracy',cv=5)
+            recall_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='recall',cv=5)
+            f1_check = cross_validate(model,self.X_check,self.y_check,return_train_score=True,scoring='f1',cv=5)  
+        
+        result_test_df = pd.DataFrame({'build_result':[accuracy,precision,recall,f1,precision_check['test_score'].mean(),accuracy_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean()]},
+                                               index=['accuracy','precision','recall','f1','precision_check','accuracy_check','recall_check','f1_check'])
+        
+        result_test_df = result_test_df.transpose()
+        result_test_df['overlearn'] = result_test_df['f1'] / result_test_df['f1_check']
+        
+        return result_test_df
+
