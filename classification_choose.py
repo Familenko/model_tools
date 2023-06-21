@@ -1,3 +1,25 @@
+import warnings
+warnings.filterwarnings('ignore')
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.decomposition import PCA
+from sklearn.pipeline import make_pipeline
+
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score, recall_score, f1_score
+
 class classifier_choose():
     
     def __init__(self,target,df,procent=1.0):
@@ -9,25 +31,20 @@ class classifier_choose():
         self.standard_mark = 'off'
         self.minmax_mark = 'off'
         
-        self.procented_features = df.sample(frac=1).iloc[:int(len(df.index)*procent)]
+        self.procented_df = df.sample(frac=1).iloc[:int(len(df.index)*procent)]
         
-        self.X = self.procented_features.drop({self.target},axis=1)
-        self.y = self.procented_features[self.target]
+        self.X = self.procented_df.drop({self.target},axis=1)
+        self.y = self.procented_df[self.target]
+
+        indexes_to_drop = self.procented_df.index.tolist()
+        self.without_procented_df = df.drop(indexes_to_drop)
 
     def split_data(self,valid = 0.2,test=0.2):
 
-        from sklearn.model_selection import train_test_split
         X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
         self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
     def preprocessing(self,mode='standard',n_components=2):
-
-        from sklearn.preprocessing import StandardScaler, MinMaxScaler
-        from sklearn.decomposition import PCA
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import numpy as np
 
         self.pca_n_components=n_components
 
@@ -74,15 +91,8 @@ class classifier_choose():
 
     def preanalize(self,alpha=0.5):
 
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.decomposition import PCA
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import numpy as np
-
         # correlation plot
-        corr_df = pd.DataFrame(self.procented_features).corr()
+        corr_df = pd.DataFrame(self.procented_df).corr()
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=200)
 
         sns.barplot(x=corr_df[self.target].sort_values().iloc[1:-1].index, 
@@ -91,11 +101,11 @@ class classifier_choose():
         ax1.set_xticklabels(ax1.get_xticklabels(), rotation=90)
 
         # distribution plot
-        if len(pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()) < 10:
-            cluster_counts = pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()
+        if len(pd.DataFrame(self.procented_df)[f'{self.target}'].value_counts()) < 10:
+            cluster_counts = pd.DataFrame(self.procented_df)[f'{self.target}'].value_counts()
             ax2.pie(cluster_counts, labels=cluster_counts.index, autopct='%1.1f%%')
         else:
-            sns.histplot(data=pd.DataFrame(self.procented_features), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
+            sns.histplot(data=pd.DataFrame(self.procented_df), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
 
         ax2.set_title(f"{self.target} Distribution")
         ax2.set_xlabel(f"{self.target}")
@@ -122,29 +132,41 @@ class classifier_choose():
         plt.show()
 
     def ensemble(self,tuner='RandomizedSearchCV',cv=5,n_jobs=None,scoring='accuracy',random_iter=5,class_weight=None):
-        
-        import warnings
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-
-        from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-        from skopt import BayesSearchCV
-        import pandas as pd
 
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
 
-        model_dict_for_tuner = {
-        RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
-        GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
-        LogisticRegression() : {'penalty': ['l1', 'l2'],'C': [0.01, 0.1, 1, 10],'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
-        SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
-        KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
+        model_dict_for_grid = {
+
+            RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
+            GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
+            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(0.01,100, 10),'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+            SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+            KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
+
+        model_dict_for_random = {
+
+            RandomForestClassifier() : 
+            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight]},
+
+            GradientBoostingClassifier() : 
+            {'n_estimators': range(64, 128, 1)},
+
+            LogisticRegression() : 
+            {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(0.01,100, 100),
+            'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
+            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
+
+            SVC() : 
+            {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+
+            KNeighborsClassifier() : 
+            {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
+
+        if tuner == "GridSearchCV":
+            model_dict_for_tuner = model_dict_for_grid
+        if tuner == "RandomizedSearchCV":
+            model_dict_for_tuner = model_dict_for_random
 
         for key,value in model_dict_for_tuner.items():
             ensemble_model_name = key.__class__.__name__
@@ -165,9 +187,6 @@ class classifier_choose():
         return self.result_df_ensamble.iloc[:, :4]
 
     def cv_results(self,model,check_from='ensemble',result='df',param=None):
-
-        import pandas as pd
-        import matplotlib.pyplot as plt
 
         if check_from=='ensemble':
             model = self.ensemble_models[model]
@@ -198,21 +217,53 @@ class classifier_choose():
             tmp.columns = ['mean_test_score', 'std_test_score']
             return tmp
 
-    def model_choose(self,mode='empty',estimator='random',params=None,estimators=None,cv=2,test_cv=2,n_jobs=None):
-        
-        import warnings
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
+    def voting(self,mode='hard'):
 
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-        from sklearn.model_selection import GridSearchCV
-        from sklearn.model_selection import cross_validate
-        import pandas as pd
+        self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
+        self.voting_model.fit(self.X_train,self.y_train)
+        return self.result_test_df(self.voting_model)
+
+    def result_test_df(self,model):
+
+        y_pred_valid = model.predict(self.X_valid)
+        accuracy_valid = round(accuracy_score(self.y_valid, y_pred_valid),2)
+        precision_valid = round(precision_score(self.y_valid, y_pred_valid, average='macro'),2)
+        recall_valid = round(recall_score(self.y_valid, y_pred_valid, average='macro'),2)
+        f1_valid = round(f1_score(self.y_valid, y_pred_valid, average='macro'),2)
+
+        y_pred_test = model.predict(self.X_test)
+        accuracy_test = round(accuracy_score(self.y_test, y_pred_test),2)
+        precision_test = round(precision_score(self.y_test, y_pred_test, average='macro'),2)
+        recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
+        f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
+        
+        
+        result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
+            recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
+            index=['accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+        
+        result_test_df = result_test_df.transpose()
+        
+        return result_test_df
+
+    def ada(self,n_estimators=50,learning_rate=1.0,estimator='logic'):
+
+        models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
+        'random':RandomForestClassifier(),'gradient':GradientBoostingClassifier(),'voting':self.voting_clf}
+
+        weak_estimator = models_dic[estimator]
+
+        try:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        except:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        return self.result_test_df(self.ada_model)
+
+    def model_choose(self,mode='empty',estimator='random',params=None,estimators=None,cv=2,test_cv=2,n_jobs=None):
 
         self.result_df = pd.DataFrame()
 
@@ -394,23 +445,6 @@ class classifier_choose():
         return self.result_df.sort_values('overlearn')
 
     def auto_build(self,cv=2,test_cv=2,test=0.2,n_jobs=None):
-
-        import warnings
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-        
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from sklearn.model_selection import GridSearchCV
-        from sklearn.preprocessing import StandardScaler, MinMaxScaler
-        from sklearn.model_selection import train_test_split
-        import pandas as pd
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-        from sklearn.decomposition import PCA
-        from sklearn.model_selection import cross_validate
         
         models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
                      'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
@@ -489,23 +523,6 @@ class classifier_choose():
         return self.build_df
 
     def choose_build(self,model_index,mode='auto',params=None,cv=2,test=0.2,test_cv=2,n_jobs=None):
-
-        import warnings
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-        
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-        from sklearn.model_selection import GridSearchCV
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import train_test_split
-        import pandas as pd
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-        from sklearn.decomposition import PCA
-        from sklearn.model_selection import cross_validate
         
         models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
                      'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
@@ -593,8 +610,6 @@ class classifier_choose():
         
     def get_build(self):
 
-        from sklearn.pipeline import make_pipeline
-
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
             self.build_pipe = make_pipeline(self.build_scaler,self.build_model.best_estimator_)
 
@@ -605,8 +620,6 @@ class classifier_choose():
 
     def get_build_model_list(self,index=-1):
 
-        from sklearn.pipeline import make_pipeline
-
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
             self.model_list_build_pipe = make_pipeline(self.model_list_scaler,self.model_list[index].best_estimator_)
 
@@ -616,13 +629,9 @@ class classifier_choose():
         return self.model_list_build_pipe
 
     def plot_mat(self,mode='voting'):   
-        
-        import seaborn as sns
-        import numpy as np
-        from sklearn.metrics import confusion_matrix, classification_report
 
         if mode == 'voting':
-            model = self.voting_clf
+            model = self.voting_model
         if mode == 'ada':
             model = self.ada_model
 
@@ -637,22 +646,12 @@ class classifier_choose():
  
     def pca_heat(self,n=100,vs=18,sh=4,dpi=150):
 
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import pandas as pd
-
         df_comp = pd.DataFrame(self.build_pca.components_,columns=self.df.drop({self.target},axis=1).columns)
 
         plt.figure(figsize=(vs,sh),dpi=dpi)
         sns.heatmap(df_comp[:n],annot=True)
 
     def pca_choose(self,min_n=1,max_n=10):
-
-        from sklearn.decomposition import PCA
-        import numpy as np
-        import matplotlib.pyplot as plt
-        import pandas as pd
-        from sklearn.preprocessing import StandardScaler
             
         scaler = StandardScaler()
         pca_X = scaler.fit_transform(self.X)
@@ -670,32 +669,7 @@ class classifier_choose():
         plt.ylabel("Variance Explained")
         plt.grid(alpha=0.2);
 
-    def ada(self,n_estimators=50,learning_rate=1.0,estimator='logic'):
-
-        from sklearn.ensemble import AdaBoostClassifier
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.svm import SVC
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-
-        models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
-        'random':RandomForestClassifier(),'gradient':GradientBoostingClassifier(),'voting':self.voting_clf}
-
-        weak_estimator = models_dic[estimator]
-
-        try:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        except:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        return self.result_test_df(self.ada_model)
-
     def get_build_ada(self):
-
-        from sklearn.pipeline import make_pipeline
 
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
             self.build_pipe = make_pipeline(self.build_scaler,self.ada)
@@ -704,39 +678,3 @@ class classifier_choose():
             self.build_pipe = make_pipeline(self.build_scaler,self.build_pca,self.ada)
 
         return self.build_pipe
-
-    def voting(self,mode='hard'):
-
-        from sklearn.ensemble import VotingClassifier
-
-        self.voting_clf = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
-        self.voting_clf.fit(self.X_train,self.y_train)
-        return self.result_test_df(self.voting_clf)
-
-    def result_test_df(self,model):
-
-        import pandas as pd
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-        from sklearn.model_selection import cross_validate
-
-        y_pred_valid = model.predict(self.X_valid)
-        accuracy_valid = round(accuracy_score(self.y_valid, y_pred_valid),2)
-        precision_valid = round(precision_score(self.y_valid, y_pred_valid, average='macro'),2)
-        recall_valid = round(recall_score(self.y_valid, y_pred_valid, average='macro'),2)
-        f1_valid = round(f1_score(self.y_valid, y_pred_valid, average='macro'),2)
-
-        y_pred_test = model.predict(self.X_test)
-        accuracy_test = round(accuracy_score(self.y_test, y_pred_test),2)
-        precision_test = round(precision_score(self.y_test, y_pred_test, average='macro'),2)
-        recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
-        f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
-        
-        
-        result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
-            recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-            index=['accuracy_valid','precision_valid','recall_valid','f1_valid','precision_test','accuracy_test','recall_test','f1_test'])
-        
-        result_test_df = result_test_df.transpose()
-        
-        return result_test_df
-
