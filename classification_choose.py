@@ -9,13 +9,6 @@ class classifier_choose():
         self.standard_mark = 'off'
         self.minmax_mark = 'off'
         
-        self.pre=[]
-        self.acc=[]
-        self.rec=[]
-        self.f=[]
-        self.model_list=[]
-        self.model_list_ensamble=[]
-        
         self.procented_features = df.sample(frac=1).iloc[:int(len(df.index)*procent)]
         
         self.X = self.procented_features.drop({self.target},axis=1)
@@ -27,7 +20,7 @@ class classifier_choose():
         X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
         self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
-    def preprocessing(self,mode='standard',n_components=2,alpha=0.5):
+    def preprocessing(self,mode='standard',n_components=2):
 
         from sklearn.preprocessing import StandardScaler, MinMaxScaler
         from sklearn.decomposition import PCA
@@ -79,60 +72,56 @@ class classifier_choose():
 
             self.model_list_pca = self.pca
 
-            if len(self.X_train.columns)==2:
+    def preanalize(self,alpha=0.5):
 
-                print(f'pca.explained_variance_ratio_ = {pca.explained_variance_ratio_}')
-                print(f'np.sum(pca.explained_variance_ratio_ = {np.sum(pca.explained_variance_ratio_)}')
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.decomposition import PCA
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import numpy as np
 
-                plt.figure(figsize=(8,6))
-                sns.scatterplot(x=self.X_train[0],y=self.X_train[1],data=self.df,hue=self.y,alpha=alpha)
-                plt.xlabel('First principal component')
-                plt.ylabel('Second Principal Component')
-                plt.show()
+        # correlation plot
+        corr_df = pd.DataFrame(self.procented_features).corr()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=200)
 
-        if mode=='analyze':
+        sns.barplot(x=corr_df[self.target].sort_values().iloc[1:-1].index, 
+                    y=corr_df[self.target].sort_values().iloc[1:-1].values, ax=ax1)
+        ax1.set_title(f"Feature Correlation to {self.target}")
+        ax1.set_xticklabels(ax1.get_xticklabels(), rotation=90)
 
-            # correlation plot
-            corr_df = pd.DataFrame(self.procented_features).corr()
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=200)
+        # distribution plot
+        if len(pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()) < 10:
+            cluster_counts = pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()
+            ax2.pie(cluster_counts, labels=cluster_counts.index, autopct='%1.1f%%')
+        else:
+            sns.histplot(data=pd.DataFrame(self.procented_features), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
 
-            sns.barplot(x=corr_df[self.target].sort_values().iloc[1:-1].index, 
-                        y=corr_df[self.target].sort_values().iloc[1:-1].values, ax=ax1)
-            ax1.set_title(f"Feature Correlation to {self.target}")
-            ax1.set_xticklabels(ax1.get_xticklabels(), rotation=90)
+        ax2.set_title(f"{self.target} Distribution")
+        ax2.set_xlabel(f"{self.target}")
+        ax2.set_ylabel("Count")
 
-            # distribution plot
-            if len(pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()) < 10:
-                cluster_counts = pd.DataFrame(self.procented_features)[f'{self.target}'].value_counts()
-                ax2.pie(cluster_counts, labels=cluster_counts.index, autopct='%1.1f%%')
-            else:
-                sns.histplot(data=pd.DataFrame(self.procented_features), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
+        plt.show()
 
-            ax2.set_title(f"{self.target} Distribution")
-            ax2.set_xlabel(f"{self.target}")
-            ax2.set_ylabel("Count")
+        # PCA plot
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(self.X)
 
-            plt.show()
+        pca = PCA(n_components=2)
+        principal_components = pca.fit_transform(X_train)
 
-            # PCA plot
-            scaler = StandardScaler()
-            X_train = scaler.fit_transform(self.X)
+        X_train_pca = pd.DataFrame(principal_components)
 
-            pca = PCA(n_components=2)
-            principal_components = pca.fit_transform(X_train)
+        print(f'pca.explained_variance_ratio_ = {pca.explained_variance_ratio_}')
+        print(f'np.sum(pca.explained_variance_ratio_ = {np.sum(pca.explained_variance_ratio_)}')
 
-            X_train_pca = pd.DataFrame(principal_components)
+        plt.figure(figsize=(12,6))
+        sns.scatterplot(x=X_train_pca[0],y=X_train_pca[1],data=pd.DataFrame(self.X),hue=self.y,alpha=alpha)
+        plt.xlabel('First principal component')
+        plt.ylabel('Second Principal Component')
+        plt.show()
 
-            print(f'pca.explained_variance_ratio_ = {pca.explained_variance_ratio_}')
-            print(f'np.sum(pca.explained_variance_ratio_ = {np.sum(pca.explained_variance_ratio_)}')
-
-            plt.figure(figsize=(12,6))
-            sns.scatterplot(x=X_train_pca[0],y=X_train_pca[1],data=pd.DataFrame(self.X),hue=self.y,alpha=alpha)
-            plt.xlabel('First principal component')
-            plt.ylabel('Second Principal Component')
-            plt.show()
-
-    def ensemble(self,tuner='GridSearchCV',cv=5,n_jobs=None,scoring='accuracy',random_iter=5):
+    def ensemble(self,tuner='RandomizedSearchCV',cv=5,n_jobs=None,scoring='accuracy',random_iter=5,class_weight=None):
         
         import warnings
         warnings.filterwarnings('ignore')
@@ -148,32 +137,66 @@ class classifier_choose():
         import pandas as pd
 
         self.result_df_ensamble = pd.DataFrame()
+        self.ensemble_models = {}
 
         model_dict_for_tuner = {
-        RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [None, 'balanced']},
-        GradientBoostingClassifier() : {'n_estimators': [64, 100, 124]},
-        LogisticRegression() : {'penalty': ['l1', 'l2'],'C': [0.01, 0.1, 1, 10],'solver': ['lbfgs', 'sag', 'saga'],'class_weight': ['balanced', None]},
-        SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']}}
+        RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
+        GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
+        LogisticRegression() : {'penalty': ['l1', 'l2'],'C': [0.01, 0.1, 1, 10],'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+        SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+        KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
         for key,value in model_dict_for_tuner.items():
-            ensamble_model_name = key.__class__.__name__
+            ensemble_model_name = key.__class__.__name__
             if tuner == "GridSearchCV":
-                ensamble_search = GridSearchCV(key,cv=cv,n_jobs=n_jobs,param_grid=value,scoring=scoring)
+                ensemble_search = GridSearchCV(key,cv=cv,n_jobs=n_jobs,param_grid=value,scoring=scoring)
             if tuner == "RandomizedSearchCV":
-                ensamble_search = RandomizedSearchCV(key,cv=cv,n_jobs=n_jobs,param_distributions=value,scoring=scoring,n_iter=random_iter)
-            if tuner == 'BayesSearchCV':
-                ensamble_search = BayesSearchCV(key,cv=cv,n_jobs=n_jobs,search_spaces=value,scoring=scoring)
+                ensemble_search = RandomizedSearchCV(key,cv=cv,n_jobs=n_jobs,param_distributions=value,scoring=scoring,n_iter=random_iter)
 
-            ensamble_search.fit(self.X_train,self.y_train)
-            self.model_list_ensamble.append(ensamble_search)
+            ensemble_search.fit(self.X_train,self.y_train)
+            self.ensemble_models[ensemble_model_name] = ensemble_search
 
-            df_iter_model_ensemble = self.result_test_df(ensamble_search)
+            df_iter_model_ensemble = self.result_test_df(ensemble_search)
             df_iter_model_ensemble = df_iter_model_ensemble.transpose()
             df_iter_model_ensemble.rename(columns={df_iter_model_ensemble.columns[-1]: str(key)}, inplace=True)
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
         self.result_df_ensamble = self.result_df_ensamble.transpose()
 
         return self.result_df_ensamble.iloc[:, :4]
+
+    def cv_results(self,model,check_from='ensemble',result='df',param=None):
+
+        import pandas as pd
+        import matplotlib.pyplot as plt
+
+        if check_from=='ensemble':
+            model = self.ensemble_models[model]
+
+        results = pd.DataFrame(model.cv_results_)
+        parameter_names = first_key = list(results['params'][0].keys())
+        parameter_names = ['param_' + param for param in parameter_names]
+        parameter_names.append('mean_test_score')
+        parameter_names.append('std_test_score')
+        results.sort_values(by='mean_test_score', ascending=False, inplace=True)
+        results.reset_index(drop=True, inplace=True)
+
+        if result == 'df':
+
+            return results[parameter_names]
+
+        if result == 'plot':
+
+            results['mean_test_score'].plot(yerr=[results['std_test_score'], results['std_test_score']], subplots=True)
+            plt.ylabel('Mean test score')
+            plt.xlabel('Hyperparameter combinations')
+
+        if result == 'summarize_by':
+
+            tmp = pd.concat([
+                results.groupby('param_'+param)['mean_test_score'].mean(),
+                results.groupby('param_'+param)['mean_test_score'].std()], axis=1)
+            tmp.columns = ['mean_test_score', 'std_test_score']
+            return tmp
 
     def model_choose(self,mode='empty',estimator='random',params=None,estimators=None,cv=2,test_cv=2,n_jobs=None):
         
@@ -369,18 +392,6 @@ class classifier_choose():
         self.result_df['overlearn'] = self.result_df['f1'] / self.result_df['f1_check']
 
         return self.result_df.sort_values('overlearn')
-
-    def metric_scatter(self):
-
-        import seaborn as sns
-        import pandas as pd
-        import matplotlib.pyplot as plt
-
-        fig, axes = plt.subplots()
-        sns.scatterplot(x=self.pre, y=self.rec, hue=self.models, size=self.acc, sizes=(50, 200), ax=axes)
-        axes.set_xlabel('Precision')
-        axes.set_ylabel('Recall')
-        axes.legend(loc=(1.1,0.0))
 
     def auto_build(self,cv=2,test_cv=2,test=0.2,n_jobs=None):
 
@@ -672,8 +683,13 @@ class classifier_choose():
 
         weak_estimator = models_dic[estimator]
 
-        self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
-        self.ada_model.fit(self.X_train, self.y_train)
+        try:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        except:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
 
         return self.result_test_df(self.ada_model)
 
@@ -693,11 +709,7 @@ class classifier_choose():
 
         from sklearn.ensemble import VotingClassifier
 
-        self.voting_clf = VotingClassifier(
-            estimators=[('random',self.model_list_ensamble[0]),('gradient',self.model_list_ensamble[1]),
-            ('logic',self.model_list_ensamble[2]),('svc',self.model_list_ensamble[3])],
-            voting = mode)
-
+        self.voting_clf = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
         self.voting_clf.fit(self.X_train,self.y_train)
         return self.result_test_df(self.voting_clf)
 
