@@ -32,14 +32,16 @@ class classifier_choose():
         self.minmax_mark = 'off'
         
         self.procented_df = df.sample(frac=1).iloc[:int(len(df.index)*procent)]
-        
         self.X = self.procented_df.drop({self.target},axis=1)
         self.y = self.procented_df[self.target]
 
         indexes_to_drop = self.procented_df.index.tolist()
         self.without_procented_df = df.drop(indexes_to_drop)
 
-    def split_data(self,valid = 0.2,test=0.2):
+        self.models_dic_base = {'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier(),'SVC':SVC(),
+        'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier()}
+
+    def split_data(self,valid = 0.15,test=0.15):
 
         X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
         self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
@@ -57,7 +59,7 @@ class classifier_choose():
             self.X_valid = scaler.transform(self.X_valid)
             self.X_test = scaler.transform(self.X_test)
 
-            self.model_list_scaler = scaler
+            self.scaler = scaler
 
         if mode=='standard':
 
@@ -68,9 +70,8 @@ class classifier_choose():
             self.X_valid = scaler.transform(self.X_valid)
             self.X_test = scaler.transform(self.X_test)
 
-            self.model_list_scaler = scaler
+            self.scaler = scaler
                 
-
         if mode=='pca':
 
             self.pca_mark = 'on'
@@ -80,14 +81,16 @@ class classifier_choose():
             self.X_valid = scaler.transform(self.X_valid)
             self.X_test = scaler.transform(self.X_test)
 
-            self.pca = PCA(n_components=n_components)
-            self.principal_components = self.pca.fit_transform(self.X_train)
+            pca = PCA(n_components=n_components)
+            self.X_train = pca.fit_transform(self.X_train)
+            self.X_valid = pca.transform(self.X_valid)
+            self.X_test = pca.transform(self.X_test)
 
-            self.X_train = pd.DataFrame(self.principal_components)
-            self.X_valid = self.pca.transform(self.X_valid)
-            self.X_test = self.pca.transform(self.X_test)
+            self.X_train = pd.DataFrame(self.X_train)
+            self.X_valid = pd.DataFrame(self.X_valid)
+            self.X_test = pd.DataFrame(self.X_test)
 
-            self.model_list_pca = self.pca
+            self.pca = pca
 
     def preanalize(self,alpha=0.5):
 
@@ -186,10 +189,19 @@ class classifier_choose():
 
         return self.result_df_ensamble.iloc[:, :4]
 
-    def cv_results(self,model,check_from='ensemble',result='df',param=None):
+    def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
-        if check_from=='ensemble':
-            model = self.ensemble_models[model]
+        if estimator_from == 'ensemble':
+            model = self.ensemble_models[estimator]
+
+        if estimator_from == 'voting':
+            model = self.voting_model
+
+        if estimator_from == 'basemodel':
+            model = self.basemodel
+
+        if estimator_from == 'ada':
+            model = self.ada_model
 
         results = pd.DataFrame(model.cv_results_)
         parameter_names = first_key = list(results['params'][0].keys())
@@ -238,20 +250,27 @@ class classifier_choose():
         f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
         
         
-        result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
+        result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),accuracy_valid,precision_valid,
             recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-            index=['accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+            index=['parameters','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
         
         result_test_df = result_test_df.transpose()
         
         return result_test_df
 
-    def ada(self,n_estimators=50,learning_rate=1.0,estimator='logic'):
+    def ada(self,n_estimators=50,learning_rate=1.0,estimator='logic',estimator_from='ensemble'):
 
-        models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
-        'random':RandomForestClassifier(),'gradient':GradientBoostingClassifier(),'voting':self.voting_clf}
+        if estimator_from == 'empty':
+            weak_estimator = self.models_dic_base[estimator]
 
-        weak_estimator = models_dic[estimator]
+        if estimator_from == 'ensemble':
+            weak_estimator = self.ensemble_models[estimator]
+
+        if estimator_from == 'voting':
+            weak_estimator = self.voting_model
+
+        if estimator_from == 'basemodel':
+            weak_estimator = self.basemodel
 
         try:
             self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
@@ -263,376 +282,58 @@ class classifier_choose():
 
         return self.result_test_df(self.ada_model)
 
-    def model_choose(self,mode='empty',estimator='random',params=None,estimators=None,cv=2,test_cv=2,n_jobs=None):
+    def basemodel(self,mode,model_name,params,cv,scoring,n_iter,n_jobs):
 
-        self.result_df = pd.DataFrame()
-
-        tree = GridSearchCV(DecisionTreeClassifier(),cv=cv,n_jobs=n_jobs,
-                            param_grid = {
-                                'min_samples_split': [2, 5, 10],
-                                'min_samples_leaf': [1, 2, 4],
-                                'class_weight': [None, 'balanced']})
-        
-        random = GridSearchCV(RandomForestClassifier(),cv=cv,n_jobs=n_jobs,
-                              param_grid = {
-                                'n_estimators': [64, 100, 128],
-                                'class_weight': [None, 'balanced']})
-                      
-        gradient = GridSearchCV(GradientBoostingClassifier(),cv=cv,n_jobs=n_jobs,
-                                param_grid = {
-                                    'n_estimators': [64, 100, 124]})
-
-        logic = GridSearchCV(LogisticRegression(),cv=cv,n_jobs=n_jobs,
-                             param_grid = {
-                                'penalty': ['l1', 'l2'],
-                                'C': [0.001, 0.01, 0.1, 1, 10, 100],
-                                'solver': ['lbfgs', 'sag', 'saga'],
-                                'max_iter': [100, 250, 500],
-                                'class_weight': ['balanced', None]})
-        
-        knn = GridSearchCV(KNeighborsClassifier(),cv=cv,n_jobs=n_jobs,
-                           param_grid={
-                            'weights':['uniform', 'distance'],
-                            'n_neighbors':range(1,30)})
-        
-        svc = GridSearchCV(SVC(),cv=cv,n_jobs=n_jobs,
-                           param_grid={                        
-                            'kernel': ['linear', 'rbf'], 
-                            'C': [0.1, 1, 10],
-                            'gamma': ['scale', 'auto']})
-
-        if mode == 'empty':
-        
-            tree = GridSearchCV(DecisionTreeClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)
-            random = GridSearchCV(RandomForestClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)       
-            gradient = GridSearchCV(GradientBoostingClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)
-            logic = GridSearchCV(LogisticRegression(),cv=cv,param_grid={},n_jobs=n_jobs)
-            knn = GridSearchCV(KNeighborsClassifier(),cv=cv,param_grid={},n_jobs=n_jobs)
-            svc = GridSearchCV(SVC(),cv=cv,param_grid={},n_jobs=n_jobs)
-
-        if mode == 'classic' or mode == 'empty':
-
-            self.models = [tree,random,gradient,logic,knn,svc]
-            models_names = ['tree','random','gradient','logic','knn','svc']
-
-            for i in range(len(self.models)):
-                model = self.models[i]
-                model.fit(self.X_train, self.y_train)
-
-                y_pred = model.predict(self.X_valid)
-                accuracy = accuracy_score(self.y_valid, y_pred)
-                precision = precision_score(self.y_valid, y_pred, average='macro')
-                recall = recall_score(self.y_valid, y_pred, average='macro')
-                f1 = f1_score(self.y_valid, y_pred, average='macro')
-                
-                self.model_list.append(model)
-                self.pre.append(precision)
-                self.acc.append(accuracy)
-                self.rec.append(recall)
-                self.f.append(f1)
-                
-                if len(self.y_test.unique())>1:
-
-                    precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision_macro',cv=test_cv)
-                    accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                    recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall_macro',cv=test_cv)
-                    f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1_macro',cv=test_cv)
-
-                else:
-
-                    precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision',cv=test_cv)
-                    accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                    recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall',cv=test_cv)
-                    f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1',cv=test_cv)               
-
-                new_df = pd.DataFrame({models_names[i]:[accuracy,precision,recall,f1,
-                                                        accuracy_check['test_score'].mean(),precision_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean(),
-                                                        model.best_estimator_.get_params()]},index=['accuracy','precision','recall','f1',
-                                                                                                    'accuracy_check','precision_check','recall_check','f1_check',
-                                                                                                    'parameters'])
-
-                self.result_df = pd.concat([self.result_df, new_df], axis=1)
-
-        if mode == 'one':
-
-            tree = GridSearchCV(DecisionTreeClassifier(),cv=cv,param_grid = {**params},n_jobs=n_jobs)        
-            random = GridSearchCV(RandomForestClassifier(),cv=cv,param_grid = {**params},n_jobs=n_jobs)
-            gradient = GridSearchCV(GradientBoostingClassifier(),cv=cv,param_grid = {**params},n_jobs=n_jobs)
-            logic = GridSearchCV(LogisticRegression(),cv=cv,param_grid = {**params},n_jobs=n_jobs)
-            knn = GridSearchCV(KNeighborsClassifier(),cv=cv,param_grid={**params},n_jobs=n_jobs)
-            svc = GridSearchCV(SVC(),cv=cv,param_grid={**params},n_jobs=n_jobs)
-
-            self.models = {'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
-            models_names = estimator
-
-            model = self.models[estimator]
-            model.fit(self.X_train, self.y_train)
-
-            y_pred = model.predict(self.X_valid)
-            accuracy = accuracy_score(self.y_valid, y_pred)
-            precision = precision_score(self.y_valid, y_pred, average='macro')
-            recall = recall_score(self.y_valid, y_pred, average='macro')
-            f1 = f1_score(self.y_valid, y_pred, average='macro')
-            
-            if len(self.y_test.unique())>1:
-
-                precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision_macro',cv=test_cv)
-                accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall_macro',cv=test_cv)
-                f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1_macro',cv=test_cv)
-
-            else:
-
-                precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision',cv=test_cv)
-                accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall',cv=test_cv)
-                f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1',cv=test_cv)               
-
-            new_df = pd.DataFrame({estimator:[accuracy,precision,recall,f1,
-                                                    accuracy_check['test_score'].mean(),precision_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean(),
-                                                    model.best_estimator_.get_params()]},index=['accuracy','precision','recall','f1',
-                                                                                                'accuracy_check','precision_check','recall_check','f1_check',
-                                                                                                'parameters'])
-
-            self.result_df = pd.concat([self.result_df, new_df], axis=1)
-
-        if mode == 'list':
-
-            self.models = {'tree':tree,'random':random,'gradient':gradient,'logic':logic,'knn':knn,'svc':svc}
-
-            for i in estimators:
-                model = self.models[i]
-
-                model.fit(self.X_train, self.y_train)
-
-                y_pred = model.predict(self.X_valid)
-                accuracy = accuracy_score(self.y_valid, y_pred)
-                precision = precision_score(self.y_valid, y_pred, average='macro')
-                recall = recall_score(self.y_valid, y_pred, average='macro')
-                f1 = f1_score(self.y_valid, y_pred, average='macro')
-                
-                self.model_list.append(model)
-                self.pre.append(precision)
-                self.acc.append(accuracy)
-                self.rec.append(recall)
-                self.f.append(f1)
-                
-                if len(self.y_test.unique())>1:
-
-                    precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision_macro',cv=test_cv)
-                    accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                    recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall_macro',cv=test_cv)
-                    f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1_macro',cv=test_cv)
-
-                else:
-
-                    precision_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='precision',cv=test_cv)
-                    accuracy_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='accuracy',cv=test_cv)
-                    recall_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='recall',cv=test_cv)
-                    f1_check = cross_validate(model,self.X_test,self.y_test,return_train_score=True,scoring='f1',cv=test_cv)               
-
-                new_df = pd.DataFrame({i:[accuracy,precision,recall,f1,
-                                                        accuracy_check['test_score'].mean(),precision_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean(),
-                                                        model.best_estimator_.get_params()]},index=['accuracy','precision','recall','f1',
-                                                                                                    'accuracy_check','precision_check','recall_check','f1_check',
-                                                                                                    'parameters'])
-
-                self.result_df = pd.concat([self.result_df, new_df], axis=1)
-
-        self.result_df = self.result_df.transpose()
-        self.result_df['overlearn'] = self.result_df['f1'] / self.result_df['f1_check']
-
-        return self.result_df.sort_values('overlearn')
-
-    def auto_build(self,cv=2,test_cv=2,test=0.2,n_jobs=None):
-        
-        models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
-                     'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
-                      'gradient':GradientBoostingClassifier()}
-        
-        result_rer = self.result_df
-        result_rer = result_rer.reset_index()
-        best_res_model = result_rer[result_rer['overlearn']<1.3].sort_values('f1').iloc[-1]
-        model_index = best_res_model['index']
-        model_param = best_res_model['parameters']
-        params_with_brackets = {key: [value] for key, value in model_param.items()}
-        
-        X = self.df.drop({self.target},axis=1)
-        y = self.df[self.target]
-
-        X, X_check, y, y_check = train_test_split(X, y, test_size=0.1)
-        self.X_train_b, self.X_valid_b, self.y_train_b, self.y_valid_b = train_test_split(X, y, test_size=test)
-        
-        if self.standard_mark == 'on':
-  
-            scaler = StandardScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-        if self.minmax_mark == 'on':
-  
-            scaler = MinMaxScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-        if self.pca_mark == 'on':
-
-            scaler = StandardScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-            self.build_pca = PCA(n_components=self.pca_n_components)
-            self.X_train_b_pca = self.build_pca.fit_transform(self.X_train_b)
-
-            self.X_train_b = pd.DataFrame(self.X_train_b_pca)
-            self.X_valid_b = self.build_pca.transform(self.X_valid_b)
-        
-        choosen_model = models_dic[model_index]
-        model = GridSearchCV(choosen_model,param_grid=params_with_brackets,cv=cv,n_jobs=n_jobs)
-        model.fit(self.X_train_b, self.y_train_b)
-        
-        y_pred = model.predict(self.X_valid_b)
-        accuracy = accuracy_score(self.y_valid_b, y_pred)
-        precision = precision_score(self.y_valid_b, y_pred, average='macro')
-        recall = recall_score(self.y_valid_b, y_pred, average='macro')
-        f1 = f1_score(self.y_valid_b, y_pred, average='macro')
-
-        if len(self.y_test.unique())>1:
-
-            precision_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='precision_macro',cv=test_cv)
-            accuracy_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='accuracy',cv=test_cv)
-            recall_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='recall_macro',cv=test_cv)
-            f1_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='f1_macro',cv=test_cv)
-
-        else:
-
-            precision_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='precision',cv=test_cv)
-            accuracy_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='accuracy',cv=test_cv)
-            recall_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='recall',cv=test_cv)
-            f1_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='f1',cv=test_cv)  
-        
-        self.build_df = pd.DataFrame({'build_result':[accuracy,precision,recall,f1,precision_check['test_score'].mean(),accuracy_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean()]},
-                                               index=['accuracy','precision','recall','f1','precision_check','accuracy_check','recall_check','f1_check'])
-        
-        self.build_df = self.build_df.transpose()
-        self.build_df['overlearn'] = self.build_df['f1'] / self.build_df['f1_check']
-
-        self.build_model = model
-        self.build_scaler = scaler
-        
-        return self.build_df
-
-    def choose_build(self,model_index,mode='auto',params=None,cv=2,test=0.2,test_cv=2,n_jobs=None):
-        
-        models_dic = {'logic':LogisticRegression(),'knn':KNeighborsClassifier(),'svc':SVC(),
-                     'tree':DecisionTreeClassifier(),'random':RandomForestClassifier(),
-                      'gradient':GradientBoostingClassifier()}
-        
-        if mode == 'auto':
-
-            result_rer = self.result_df
-            model_param = result_rer.loc[model_index]['parameters']
-            params_with_brackets = {key: [value] for key, value in model_param.items()}
-        
-        X = self.df.drop({self.target},axis=1)
-        y = self.df[self.target]
-
-        X, X_check, y, y_check = train_test_split(X, y, test_size=0.1)
-        self.X_train_b, self.X_valid_b, self.y_train_b, self.y_valid_b = train_test_split(X, y, test_size=test)
-        
-        if self.standard_mark == 'on':
-  
-            scaler = StandardScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-        if self.minmax_mark == 'on':
-  
-            scaler = MinMaxScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-        if self.pca_mark == 'on':
-
-            scaler = StandardScaler()
-            self.X_train_b = scaler.fit_transform(self.X_train_b)
-            self.X_valid_b = scaler.transform(self.X_valid_b)
-
-            self.build_pca = PCA(n_components=self.pca_n_components)
-            self.X_train_b_pca = self.build_pca.fit_transform(self.X_train_b)
-
-            self.X_train_b = pd.DataFrame(self.X_train_b_pca)
-            self.X_valid_b = self.build_pca.transform(self.X_valid_b)
-
-        if mode == 'auto':
-
-            choosen_model = models_dic[model_index]
-            model = GridSearchCV(choosen_model,param_grid=params_with_brackets,cv=cv,n_jobs=n_jobs)
+        basemodel = self.models_dic_base[model_name]
 
         if mode == 'set':
+            basemodel.set_params(**params)
 
-            choosen_model = models_dic[model_index]
-            choosen_model.set_params(**params)
-            model = GridSearchCV(choosen_model,param_grid={},cv=cv)
+        if mode == 'grid':
+            basemodel = GridSearchCV(basemodel,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
 
-        model.fit(self.X_train_b, self.y_train_b)
-        
-        y_pred = model.predict(self.X_valid_b)
-        accuracy = accuracy_score(self.y_valid_b, y_pred)
-        precision = precision_score(self.y_valid_b, y_pred, average='macro')
-        recall = recall_score(self.y_valid_b, y_pred, average='macro')
-        f1 = f1_score(self.y_valid_b, y_pred, average='macro')
-        
-        if len(self.y_test.unique())>1:
+        if mode == 'random':
+            basemodel = RandomizedSearchCV(basemodel,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=random_iter)
 
-            precision_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='precision_macro',cv=test_cv)
-            accuracy_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='accuracy',cv=test_cv)
-            recall_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='recall_macro',cv=test_cv)
-            f1_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='f1_macro',cv=test_cv)
+        basemodel.fit(self.X_train, self.y_train)
+        self.basemodel = basemodel
 
-        else:
+        return self.result_test_df(basemodel)
+        
+    def get_pipe(self,estimator_from,estimator=None):
 
-            precision_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='precision',cv=test_cv)
-            accuracy_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='accuracy',cv=test_cv)
-            recall_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='recall',cv=test_cv)
-            f1_check = cross_validate(model,X_check,y_check,return_train_score=True,scoring='f1',cv=test_cv)  
-        
-        self.build_df = pd.DataFrame({'build_result':[accuracy,precision,recall,f1,precision_check['test_score'].mean(),accuracy_check['test_score'].mean(),recall_check['test_score'].mean(),f1_check['test_score'].mean()]},
-                                               index=['accuracy','precision','recall','f1','precision_check','accuracy_check','recall_check','f1_check'])
-        
-        self.build_df = self.build_df.transpose()
-        self.build_df['overlearn'] = self.build_df['f1'] / self.build_df['f1_check']
+        if estimator_from == 'ensemble':
+            model = self.ensemble_models[estimator]
 
-        self.build_model = model
-        self.build_scaler = scaler
-        
-        return self.build_df
-        
-    def get_build(self):
+        if estimator_from == 'voting':
+            model = self.voting_model
+
+        if estimator_from == 'basemodel':
+            model = self.basemodel
+
+        if estimator_from == 'ada':
+            model = self.ada_model
 
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
-            self.build_pipe = make_pipeline(self.build_scaler,self.build_model.best_estimator_)
+            self.build_pipe = make_pipeline(self.scaler,model)
 
         if self.pca_mark == 'on':
-            self.build_pipe = make_pipeline(self.build_scaler,self.build_pca,self.build_model.best_estimator_)
+            self.build_pipe = make_pipeline(self.scaler,self.pca,model)
 
         return self.build_pipe
 
-    def get_build_model_list(self,index=-1):
+    def plot_mat(self,estimator_from='voting',estimator=None):   
 
-        if self.standard_mark == 'on' or self.minmax_mark == 'on':
-            self.model_list_build_pipe = make_pipeline(self.model_list_scaler,self.model_list[index].best_estimator_)
+        if estimator_from == 'ensemble':
+            model = self.ensemble_models[estimator]
 
-        if self.pca_mark == 'on':
-            self.model_list_build_pipe = make_pipeline(self.model_list_scaler,self.model_list_pca,self.model_list[index].best_estimator_)
-
-        return self.model_list_build_pipe
-
-    def plot_mat(self,mode='voting'):   
-
-        if mode == 'voting':
+        if estimator_from == 'voting':
             model = self.voting_model
-        if mode == 'ada':
+
+        if estimator_from == 'basemodel':
+            model = self.basemodel
+
+        if estimator_from == 'ada':
             model = self.ada_model
 
         y_pred = model.predict(self.X_test)
@@ -646,7 +347,7 @@ class classifier_choose():
  
     def pca_heat(self,n=100,vs=18,sh=4,dpi=150):
 
-        df_comp = pd.DataFrame(self.build_pca.components_,columns=self.df.drop({self.target},axis=1).columns)
+        df_comp = pd.DataFrame(self.pca.components_,columns=self.df.drop({self.target},axis=1).columns)
 
         plt.figure(figsize=(vs,sh),dpi=dpi)
         sns.heatmap(df_comp[:n],annot=True)
@@ -668,13 +369,3 @@ class classifier_choose():
         plt.xlabel("Number of Components")
         plt.ylabel("Variance Explained")
         plt.grid(alpha=0.2);
-
-    def get_build_ada(self):
-
-        if self.standard_mark == 'on' or self.minmax_mark == 'on':
-            self.build_pipe = make_pipeline(self.build_scaler,self.ada)
-
-        if self.pca_mark == 'on':
-            self.build_pipe = make_pipeline(self.build_scaler,self.build_pca,self.ada)
-
-        return self.build_pipe
