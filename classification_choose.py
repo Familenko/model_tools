@@ -22,8 +22,8 @@ from sklearn.metrics import confusion_matrix, classification_report, accuracy_sc
 
 class classifier_choose():
     
-    def __init__(self,target,df,procent=1.0):
-        
+    def __init__(self,target,df,class_weight=None):
+
         self.df = df
         self.target = target
 
@@ -31,26 +31,51 @@ class classifier_choose():
         self.standard_mark = 'off'
         self.minmax_mark = 'off'
         
-        self.procented_df = df.sample(frac=1).iloc[:int(len(df.index)*procent)]
-        self.X = self.procented_df.drop({self.target},axis=1)
-        self.y = self.procented_df[self.target]
-
-        indexes_to_drop = self.procented_df.index.tolist()
-        self.without_procented_df = df.drop(indexes_to_drop)
+        self.X = self.df.drop({self.target},axis=1)
+        self.y = self.df[self.target]
 
         self.models_dic_base = {'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier(),'SVC':SVC(),
         'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier()}
+
+        self.model_dict_for_grid = {
+
+            RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
+            GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
+            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+            SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+            KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
+
+        self.model_dict_for_random = {
+
+            RandomForestClassifier() : 
+            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight]},
+
+            GradientBoostingClassifier() : 
+            {'n_estimators': range(64, 128, 1)},
+
+            LogisticRegression() : 
+            {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=10),
+            'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
+            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
+
+            SVC() : 
+            {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+
+            KNeighborsClassifier() : 
+            {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
 
     def split_data(self,valid = 0.15,test=0.15):
 
         X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
         self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
-    def preprocessing(self,mode='standard',n_components=2):
+        return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
+
+    def preprocessing(self,mode='StandardScaler',n_components=2):
 
         self.pca_n_components=n_components
 
-        if mode=='minmax':
+        if mode=='MinMaxScaler':
 
             self.standard_mark = 'on'
   
@@ -61,7 +86,7 @@ class classifier_choose():
 
             self.scaler = scaler
 
-        if mode=='standard':
+        if mode=='StandardScaler':
 
             self.standard_mark = 'on'
   
@@ -72,7 +97,7 @@ class classifier_choose():
 
             self.scaler = scaler
                 
-        if mode=='pca':
+        if mode=='PCA':
 
             self.pca_mark = 'on'
 
@@ -90,12 +115,15 @@ class classifier_choose():
             self.X_valid = pd.DataFrame(self.X_valid)
             self.X_test = pd.DataFrame(self.X_test)
 
+            self.scaler = scaler
             self.pca = pca
+
+        return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
     def preanalize(self,alpha=0.5):
 
         # correlation plot
-        corr_df = pd.DataFrame(self.procented_df).corr()
+        corr_df = pd.DataFrame(self.df).corr()
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=200)
 
         sns.barplot(x=corr_df[self.target].sort_values().iloc[1:-1].index, 
@@ -104,11 +132,11 @@ class classifier_choose():
         ax1.set_xticklabels(ax1.get_xticklabels(), rotation=90)
 
         # distribution plot
-        if len(pd.DataFrame(self.procented_df)[f'{self.target}'].value_counts()) < 10:
-            cluster_counts = pd.DataFrame(self.procented_df)[f'{self.target}'].value_counts()
+        if len(pd.DataFrame(self.df)[f'{self.target}'].value_counts()) < 10:
+            cluster_counts = pd.DataFrame(self.df)[f'{self.target}'].value_counts()
             ax2.pie(cluster_counts, labels=cluster_counts.index, autopct='%1.1f%%')
         else:
-            sns.histplot(data=pd.DataFrame(self.procented_df), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
+            sns.histplot(data=pd.DataFrame(self.df), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
 
         ax2.set_title(f"{self.target} Distribution")
         ax2.set_xlabel(f"{self.target}")
@@ -134,49 +162,22 @@ class classifier_choose():
         plt.ylabel('Second Principal Component')
         plt.show()
 
-    def ensemble(self,tuner='RandomizedSearchCV',cv=5,n_jobs=None,scoring='accuracy',random_iter=5,class_weight=None):
+    def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=None):
 
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
 
-        model_dict_for_grid = {
-
-            RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
-            GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
-            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(0.01,100, 10),'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
-            SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
-            KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
-
-        model_dict_for_random = {
-
-            RandomForestClassifier() : 
-            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight]},
-
-            GradientBoostingClassifier() : 
-            {'n_estimators': range(64, 128, 1)},
-
-            LogisticRegression() : 
-            {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(0.01,100, 100),
-            'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
-            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
-
-            SVC() : 
-            {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
-
-            KNeighborsClassifier() : 
-            {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
-
         if tuner == "GridSearchCV":
-            model_dict_for_tuner = model_dict_for_grid
+            model_dict_for_tuner = self.model_dict_for_grid
         if tuner == "RandomizedSearchCV":
-            model_dict_for_tuner = model_dict_for_random
+            model_dict_for_tuner = self.model_dict_for_random
 
         for key,value in model_dict_for_tuner.items():
             ensemble_model_name = key.__class__.__name__
             if tuner == "GridSearchCV":
                 ensemble_search = GridSearchCV(key,cv=cv,n_jobs=n_jobs,param_grid=value,scoring=scoring)
             if tuner == "RandomizedSearchCV":
-                ensemble_search = RandomizedSearchCV(key,cv=cv,n_jobs=n_jobs,param_distributions=value,scoring=scoring,n_iter=random_iter)
+                ensemble_search = RandomizedSearchCV(key,cv=cv,n_jobs=n_jobs,param_distributions=value,scoring=scoring,n_iter=n_iter)
 
             ensemble_search.fit(self.X_train,self.y_train)
             self.ensemble_models[ensemble_model_name] = ensemble_search
@@ -187,7 +188,7 @@ class classifier_choose():
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
         self.result_df_ensamble = self.result_df_ensamble.transpose()
 
-        return self.result_df_ensamble.iloc[:, :4]
+        return self.result_df_ensamble.iloc[:, :5]
 
     def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
@@ -198,7 +199,7 @@ class classifier_choose():
             model = self.voting_model
 
         if estimator_from == 'basemodel':
-            model = self.basemodel
+            model = self.basemodel_model
 
         if estimator_from == 'ada':
             model = self.ada_model
@@ -231,7 +232,7 @@ class classifier_choose():
 
     def voting(self,mode='hard'):
 
-        self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
+        self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
         self.voting_model.fit(self.X_train,self.y_train)
         return self.result_test_df(self.voting_model)
 
@@ -249,28 +250,32 @@ class classifier_choose():
         recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
         f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
         
-        
-        result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),accuracy_valid,precision_valid,
-            recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-            index=['parameters','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
-        
+        try:
+            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),accuracy_valid,precision_valid,
+                recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
+                index=['parameters','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+        except AttributeError:
+            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
+                recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
+                index=['accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+
         result_test_df = result_test_df.transpose()
         
         return result_test_df
 
-    def ada(self,n_estimators=50,learning_rate=1.0,estimator='logic',estimator_from='ensemble'):
+    def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
 
         if estimator_from == 'empty':
             weak_estimator = self.models_dic_base[estimator]
 
         if estimator_from == 'ensemble':
-            weak_estimator = self.ensemble_models[estimator]
+            weak_estimator = self.ensemble_models[estimator].best_estimator_
 
         if estimator_from == 'voting':
             weak_estimator = self.voting_model
 
         if estimator_from == 'basemodel':
-            weak_estimator = self.basemodel
+            weak_estimator = self.basemodel_model.best_estimator_
 
         try:
             self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
@@ -282,23 +287,35 @@ class classifier_choose():
 
         return self.result_test_df(self.ada_model)
 
-    def basemodel(self,mode,model_name,params,cv,scoring,n_iter,n_jobs):
+    def basemodel(self,mode='auto_random',model_name='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
 
-        basemodel = self.models_dic_base[model_name]
+        model = self.models_dic_base[model_name]
 
-        if mode == 'set':
-            basemodel.set_params(**params)
+        index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
+        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[model_name]]]
 
-        if mode == 'grid':
-            basemodel = GridSearchCV(basemodel,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
+        index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_grid.keys()))}
+        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[model_name]]]
 
-        if mode == 'random':
-            basemodel = RandomizedSearchCV(basemodel,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=random_iter)
+        if mode == 'set_manual':
+            search = model.set_params(**params)
 
-        basemodel.fit(self.X_train, self.y_train)
-        self.basemodel = basemodel
+        if mode == 'set_grid':
+            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
 
-        return self.result_test_df(basemodel)
+        if mode == 'auto_grid':
+            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid=parameter_dic_grid,scoring=scoring)
+
+        if mode == 'set_random':
+            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=n_iter)
+
+        if mode == 'auto_random':
+            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions=parameter_dic_random,scoring=scoring,n_iter=n_iter)
+
+        search.fit(self.X_train, self.y_train)
+        self.basemodel_model = search
+
+        return self.result_test_df(search).iloc[:, :5]
         
     def get_pipe(self,estimator_from,estimator=None):
 
@@ -309,7 +326,7 @@ class classifier_choose():
             model = self.voting_model
 
         if estimator_from == 'basemodel':
-            model = self.basemodel
+            model = self.basemodel_model
 
         if estimator_from == 'ada':
             model = self.ada_model
@@ -331,7 +348,7 @@ class classifier_choose():
             model = self.voting_model
 
         if estimator_from == 'basemodel':
-            model = self.basemodel
+            model = self.basemodel_model
 
         if estimator_from == 'ada':
             model = self.ada_model
