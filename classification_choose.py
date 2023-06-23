@@ -1,6 +1,5 @@
 import warnings
-warnings.filterwarnings('ignore')
-warnings.simplefilter(action='ignore', category=FutureWarning)
+from tqdm import tqdm
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
@@ -73,24 +72,18 @@ class classifier_choose():
 
     def preprocessing(self,mode='StandardScaler',n_components=2):
 
-        self.pca_n_components=n_components
-
         if mode=='MinMaxScaler':
 
             self.standard_mark = 'on'
-  
             scaler = MinMaxScaler()
-            self.X_train = scaler.fit_transform(self.X_train)
-            self.X_valid = scaler.transform(self.X_valid)
-            self.X_test = scaler.transform(self.X_test)
-
-            self.scaler = scaler
 
         if mode=='StandardScaler':
 
             self.standard_mark = 'on'
-  
             scaler = StandardScaler()
+
+        if mode=='MinMaxScaler' or mode=='StandardScaler':
+
             self.X_train = scaler.fit_transform(self.X_train)
             self.X_valid = scaler.transform(self.X_valid)
             self.X_test = scaler.transform(self.X_test)
@@ -164,6 +157,9 @@ class classifier_choose():
 
     def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=None):
 
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
 
@@ -172,8 +168,10 @@ class classifier_choose():
         if tuner == "RandomizedSearchCV":
             model_dict_for_tuner = self.model_dict_for_random
 
-        for key,value in model_dict_for_tuner.items():
+        for key, value in tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models"):
             ensemble_model_name = key.__class__.__name__
+            print(f"Model: {ensemble_model_name}")
+
             if tuner == "GridSearchCV":
                 ensemble_search = GridSearchCV(key,cv=cv,n_jobs=n_jobs,param_grid=value,scoring=scoring)
             if tuner == "RandomizedSearchCV":
@@ -188,7 +186,7 @@ class classifier_choose():
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
         self.result_df_ensamble = self.result_df_ensamble.transpose()
 
-        return self.result_df_ensamble.iloc[:, :5]
+        return self.result_df_ensamble.iloc[:, :6]
 
     def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
@@ -232,6 +230,9 @@ class classifier_choose():
 
     def voting(self,mode='hard'):
 
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
         self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
         self.voting_model.fit(self.X_train,self.y_train)
         return self.result_test_df(self.voting_model)
@@ -249,11 +250,13 @@ class classifier_choose():
         precision_test = round(precision_score(self.y_test, y_pred_test, average='macro'),2)
         recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
         f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
+
+        building_time = model.cv_results_['mean_fit_time'].sum()
         
         try:
-            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),accuracy_valid,precision_valid,
+            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),building_time,accuracy_valid,precision_valid,
                 recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-                index=['parameters','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
         except AttributeError:
             result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
                 recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
@@ -264,6 +267,9 @@ class classifier_choose():
         return result_test_df
 
     def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
+
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         if estimator_from == 'empty':
             weak_estimator = self.models_dic_base[estimator]
@@ -288,6 +294,9 @@ class classifier_choose():
         return self.result_test_df(self.ada_model)
 
     def basemodel(self,mode='auto_random',model_name='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
+
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         model = self.models_dic_base[model_name]
 
@@ -315,7 +324,7 @@ class classifier_choose():
         search.fit(self.X_train, self.y_train)
         self.basemodel_model = search
 
-        return self.result_test_df(search).iloc[:, :5]
+        return self.result_test_df(search).iloc[:, :6]
         
     def get_pipe(self,estimator_from,estimator=None):
 
@@ -369,7 +378,7 @@ class classifier_choose():
         plt.figure(figsize=(vs,sh),dpi=dpi)
         sns.heatmap(df_comp[:n],annot=True)
 
-    def pca_choose(self,min_n=1,max_n=10):
+    def pca_choose(self,min_n=2,max_n=10):
             
         scaler = StandardScaler()
         pca_X = scaler.fit_transform(self.X)
