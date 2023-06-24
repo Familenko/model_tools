@@ -293,12 +293,12 @@ class classifier_choose():
 
         return self.result_test_df(self.ada_model)
 
-    def basemodel(self,mode='auto_random',model_name='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
+    def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
 
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
-        model = self.models_dic_base[model_name]
+        model = self.models_dic_base[estimator]
 
         index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
         parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[model_name]]]
