@@ -4,6 +4,7 @@ from tqdm import tqdm
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
+from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
@@ -33,16 +34,22 @@ class classifier_choose():
         self.X = self.df.drop({self.target},axis=1)
         self.y = self.df[self.target]
 
-        self.models_dic_base = {'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier(),'SVC':SVC(),
-        'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier()}
+        self.models_dic_base = {'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
+        'LogisticRegression':LogisticRegression(),'XGBClassifier':XGBClassifier(),'SVC':SVC(),'KNeighborsClassifier':KNeighborsClassifier()}
 
         self.model_dict_for_grid = {
 
             RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
-            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
+            'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+            XGBClassifier() :{'max_depth': [3, 5, 7],'eta': np.logspace(np.log10(0.1), np.log10(3.0), num=3),
+            'subsample': np.linspace(0.1, 0.5, 3),'min_split_loss': [ 0.1, 0.2, 0.3],
+            'alpha': [ 0.01, 0.1, 1],'lambda': [ 0.01, 0.1, 1],'min_child_weight': [1, 5, 10],
+            'booster': ['gbtree', 'gblinear']},
             SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
+
 
         self.model_dict_for_random = {
 
@@ -57,16 +64,27 @@ class classifier_choose():
             'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
             'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
 
+            XGBClassifier() :
+            {'max_depth': [3, 4, 5, 6, 7],'eta': np.logspace(np.log10(0.1), np.log10(4.0), num=10),
+            'subsample': np.linspace(0.1, 0.5, 5),'min_split_loss': [0, 0.1, 0.2, 0.3, 0.4],
+            'alpha': [0, 0.001, 0.01, 0.1, 1],'lambda': [0, 0.001, 0.01, 0.1, 1],
+            'min_child_weight': [1, 3, 5, 7, 10],'booster': ['gbtree', 'gblinear']},
+
             SVC() : 
             {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
 
             KNeighborsClassifier() : 
             {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
 
-    def split_data(self,valid = 0.15,test=0.15):
+    def split_data(self,valid = 0.15,test=0.15,stratify=None):
 
-        X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
-        self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
+        if stratify:
+            X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test, stratify=self.y)
+            self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid,stratify=y)
+
+        else:
+            X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
+            self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
         return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
@@ -165,7 +183,7 @@ class classifier_choose():
 
         if tuner == "GridSearchCV":
             model_dict_for_tuner = self.model_dict_for_grid
-        if tuner == "RandomizedSearchCV":
+        if tuner == "RandomizedSearchCV" or tuner == 'default':
             model_dict_for_tuner = self.model_dict_for_random
 
         for key, value in tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models"):
@@ -176,6 +194,8 @@ class classifier_choose():
                 ensemble_search = GridSearchCV(key,cv=cv,n_jobs=n_jobs,param_grid=value,scoring=scoring)
             if tuner == "RandomizedSearchCV":
                 ensemble_search = RandomizedSearchCV(key,cv=cv,n_jobs=n_jobs,param_distributions=value,scoring=scoring,n_iter=n_iter)
+            if tuner == 'default':
+                ensemble_search = key
 
             ensemble_search.fit(self.X_train,self.y_train)
             self.ensemble_models[ensemble_model_name] = ensemble_search
@@ -185,6 +205,7 @@ class classifier_choose():
             df_iter_model_ensemble.rename(columns={df_iter_model_ensemble.columns[-1]: str(key)}, inplace=True)
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
         self.result_df_ensamble = self.result_df_ensamble.transpose()
+        self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
         return self.result_df_ensamble.iloc[:, :6]
 
@@ -233,7 +254,12 @@ class classifier_choose():
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
-        self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
+        try:
+            self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
+
+        except AttributeError:
+            self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
+
         self.voting_model.fit(self.X_train,self.y_train)
         return self.result_test_df(self.voting_model)
 
@@ -251,16 +277,14 @@ class classifier_choose():
         recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
         f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
 
-        building_time = model.cv_results_['mean_fit_time'].sum()
-        
         try:
-            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),building_time,accuracy_valid,precision_valid,
-                recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
+            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),model.cv_results_['mean_fit_time'].sum(),
+                accuracy_valid,precision_valid,recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
                 index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
         except AttributeError:
-            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[accuracy_valid,precision_valid,
+            result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.get_params(),'|',accuracy_valid,precision_valid,
                 recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-                index=['accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
 
         result_test_df = result_test_df.transpose()
         
@@ -301,10 +325,10 @@ class classifier_choose():
         model = self.models_dic_base[estimator]
 
         index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
-        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[model_name]]]
+        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[estimator]]]
 
         index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_grid.keys()))}
-        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[model_name]]]
+        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[estimator]]]
 
         if mode == 'set_manual':
             search = model.set_params(**params)
