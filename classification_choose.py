@@ -6,6 +6,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier
+from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
 import pandas as pd
@@ -35,34 +36,29 @@ class classifier_choose():
         self.y = self.df[self.target]
 
         self.models_dic_base = {'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
-        'LogisticRegression':LogisticRegression(),'XGBClassifier':XGBClassifier(),'SVC':SVC(),'KNeighborsClassifier':KNeighborsClassifier()}
+        'XGBClassifier':XGBClassifier(),'SVC':SVC(),'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier()}
 
         self.model_dict_for_grid = {
 
             RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
-            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
-            'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
             XGBClassifier() :{'max_depth': [3, 5, 7],'eta': np.logspace(np.log10(0.1), np.log10(3.0), num=3),
             'subsample': np.linspace(0.1, 0.5, 3),'min_split_loss': [ 0.1, 0.2, 0.3],
             'alpha': [ 0.01, 0.1, 1],'lambda': [ 0.01, 0.1, 1],'min_child_weight': [1, 5, 10],
             'booster': ['gbtree', 'gblinear']},
             SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
+            'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
 
         self.model_dict_for_random = {
 
             RandomForestClassifier() : 
-            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight]},
+            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight],'max_depth':[1,2,3,4,5,6,7,8,9,10]},
 
             GradientBoostingClassifier() : 
             {'n_estimators': range(64, 128, 1)},
-
-            LogisticRegression() : 
-            {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=10),
-            'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
-            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
 
             XGBClassifier() :
             {'max_depth': [3, 4, 5, 6, 7],'eta': np.logspace(np.log10(0.1), np.log10(4.0), num=10),
@@ -72,6 +68,11 @@ class classifier_choose():
 
             SVC() : 
             {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+
+            LogisticRegression() : 
+            {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=10),
+            'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
+            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
 
             KNeighborsClassifier() : 
             {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
@@ -173,7 +174,7 @@ class classifier_choose():
         plt.ylabel('Second Principal Component')
         plt.show()
 
-    def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=None):
+    def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=1,tree_only=False):
 
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -186,7 +187,11 @@ class classifier_choose():
         if tuner == "RandomizedSearchCV" or tuner == 'default':
             model_dict_for_tuner = self.model_dict_for_random
 
-        for key, value in tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models"):
+        for idx, (key, value) in enumerate(tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models")):
+
+            if tree_only and idx >= 3:
+                break
+
             ensemble_model_name = key.__class__.__name__
             print(f"Model: {ensemble_model_name}")
 
@@ -204,10 +209,154 @@ class classifier_choose():
             df_iter_model_ensemble = df_iter_model_ensemble.transpose()
             df_iter_model_ensemble.rename(columns={df_iter_model_ensemble.columns[-1]: str(key)}, inplace=True)
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
+
         self.result_df_ensamble = self.result_df_ensamble.transpose()
-        self.result_df_ensamble.index = list(self.models_dic_base.keys())
+
+        if tree_only:
+            self.result_df_ensamble.index = list(self.models_dic_base.keys())[:3]
+        else:
+            self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
         return self.result_df_ensamble.iloc[:, :6]
+
+    def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
+
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        model = self.models_dic_base[estimator]
+
+        index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
+        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[estimator]]]
+
+        index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_grid.keys()))}
+        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[estimator]]]
+
+        if mode == 'set_manual':
+            search = model.set_params(**params)
+
+        if mode == 'set_grid':
+            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
+
+        if mode == 'auto_grid':
+            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid=parameter_dic_grid,scoring=scoring)
+
+        if mode == 'set_random':
+            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=n_iter)
+
+        if mode == 'auto_random':
+            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions=parameter_dic_random,scoring=scoring,n_iter=n_iter)
+
+        search.fit(self.X_train, self.y_train)
+        self.basemodel_model = search
+
+        return self.result_test_df(search).iloc[:, :6]
+
+    def voting(self,mode='hard'):
+
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        try:
+            self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
+
+        except AttributeError:
+            self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
+
+        self.voting_model.fit(self.X_train,self.y_train)
+        return self.result_test_df(self.voting_model)
+
+    def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
+
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        if estimator_from == 'default':
+            weak_estimator = self.models_dic_base[estimator]
+
+        if estimator_from == 'ensemble':
+            weak_estimator = self.ensemble_models[estimator].best_estimator_
+
+        if estimator_from == 'voting':
+            weak_estimator = self.voting_model
+
+        if estimator_from == 'basemodel':
+            weak_estimator = self.basemodel_model.best_estimator_
+
+        if estimator_from == 'tuning':
+            weak_estimator = self.tuning_model
+
+        try:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        except:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        return self.result_test_df(self.ada_model)
+
+    def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1):
+
+        test_error_rates = []
+
+        if estimator_from == 'default':
+            tuning_model = self.models_dic_base[estimator]
+
+        if estimator_from == 'ensemble':
+            tuning_model = self.ensemble_models[estimator].best_estimator_
+            params = self.ensemble_models[estimator].best_params_
+
+        if estimator_from == 'basemodel':
+            tuning_model = self.basemodel_model.best_estimator_
+            params = self.basemodel_model.best_params_
+
+        if estimator_from == 'ada':
+            tuning_model = self.ada_model
+            params = self.ada_model.get_params()
+
+        if params and target in params:
+            del params[target]
+
+        if set_target:
+
+            params_dict = {target : set_target}
+            if params:
+                params_dict.update(params)
+            tuning_model.set_params(**params_dict)
+            tuning_model.fit(self.X_train, self.y_train)
+
+            self.tuning_model = tuning_model
+
+            return self.result_test_df(tuning_model).iloc[:, :6]
+
+        else:
+
+            for i in tqdm(np.arange(min_n, max_n, step),desc="Checking model"):
+
+                try:
+                    params_dict = {target: i}
+                    if params:
+                        params_dict.update(params)
+                    tuning_model.set_params(**params_dict)
+
+                except InvalidParameterError:
+                    i = i.astype('int')
+                    params_dict = {target: i}
+                    if params:
+                        params_dict.update(params)
+                    tuning_model.set_params(**params_dict)
+
+                tuning_model.fit(self.X_train, self.y_train) 
+                y_pred_test = tuning_model.predict(self.X_valid)
+                test_error = 1 - accuracy_score(self.y_valid, y_pred_test)
+                test_error_rates.append(test_error)
+
+            plt.plot(np.arange(min_n, max_n, step), test_error_rates, label='Test Error')
+            plt.legend()
+            plt.ylabel('Error Rate')
+            plt.xlabel("Target value")
+            plt.show()
 
     def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
@@ -249,20 +398,6 @@ class classifier_choose():
             tmp.columns = ['mean_test_score', 'std_test_score']
             return tmp
 
-    def voting(self,mode='hard'):
-
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        try:
-            self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
-
-        except AttributeError:
-            self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
-
-        self.voting_model.fit(self.X_train,self.y_train)
-        return self.result_test_df(self.voting_model)
-
     def result_test_df(self,model):
 
         y_pred_valid = model.predict(self.X_valid)
@@ -289,66 +424,6 @@ class classifier_choose():
         result_test_df = result_test_df.transpose()
         
         return result_test_df
-
-    def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
-
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        if estimator_from == 'empty':
-            weak_estimator = self.models_dic_base[estimator]
-
-        if estimator_from == 'ensemble':
-            weak_estimator = self.ensemble_models[estimator].best_estimator_
-
-        if estimator_from == 'voting':
-            weak_estimator = self.voting_model
-
-        if estimator_from == 'basemodel':
-            weak_estimator = self.basemodel_model.best_estimator_
-
-        try:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        except:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        return self.result_test_df(self.ada_model)
-
-    def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
-
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        model = self.models_dic_base[estimator]
-
-        index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
-        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[estimator]]]
-
-        index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_grid.keys()))}
-        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[estimator]]]
-
-        if mode == 'set_manual':
-            search = model.set_params(**params)
-
-        if mode == 'set_grid':
-            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
-
-        if mode == 'auto_grid':
-            search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid=parameter_dic_grid,scoring=scoring)
-
-        if mode == 'set_random':
-            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=n_iter)
-
-        if mode == 'auto_random':
-            search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions=parameter_dic_random,scoring=scoring,n_iter=n_iter)
-
-        search.fit(self.X_train, self.y_train)
-        self.basemodel_model = search
-
-        return self.result_test_df(search).iloc[:, :6]
         
     def get_pipe(self,estimator_from,estimator=None):
 
@@ -364,6 +439,9 @@ class classifier_choose():
         if estimator_from == 'ada':
             model = self.ada_model
 
+        if estimator_from == 'tuning':
+            model = self.tuning_model
+
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
             self.build_pipe = make_pipeline(self.scaler,model)
 
@@ -371,6 +449,30 @@ class classifier_choose():
             self.build_pipe = make_pipeline(self.scaler,self.pca,model)
 
         return self.build_pipe
+ 
+    def pca_heat(self,n=100,vs=18,sh=4,dpi=150):
+
+        df_comp = pd.DataFrame(self.pca.components_,columns=self.df.drop({self.target},axis=1).columns)
+
+        plt.figure(figsize=(vs,sh),dpi=dpi)
+        sns.heatmap(df_comp[:n],annot=True)
+
+    def plot_trees(self,dpi=300,criterion='gini',max_depth=2,min_samples_split=2,min_samples_leaf=1,min_weight_fraction_leaf=0,max_leaf_nodes=None,min_impurity_decrease=0.0,class_weight=None,ccp_alpha=0.0):
+
+        tree = DecisionTreeClassifier(max_depth=max_depth,criterion=criterion,min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,min_weight_fraction_leaf=min_weight_fraction_leaf,max_leaf_nodes=max_leaf_nodes,
+            min_impurity_decrease=min_impurity_decrease,class_weight=class_weight,ccp_alpha=ccp_alpha)
+        tree.fit(self.X_train,self.y_train)
+
+        self.plot_trees_df = pd.DataFrame(index=self.X_train.columns,data=tree.feature_importances_,columns=['Feature Importance']).sort_values('Feature Importance',ascending=False)
+
+        plt.figure(figsize=(12,8),dpi=dpi)
+        class_names = [str(cls) for cls in self.y.unique()]
+        plot_tree(tree,filled=True,feature_names=self.X_train.columns,proportion=True,rounded=True,precision=2,
+            class_names=class_names,label='root',);
+        plt.savefig("decision_tree.png")
+
+        return self.plot_trees_df
 
     def plot_mat(self,estimator_from='voting',estimator=None):   
 
@@ -394,15 +496,8 @@ class classifier_choose():
         ax.set(xlabel='Predict', ylabel='Actual')
 
         print(classification_report(self.y_test,y_pred))
- 
-    def pca_heat(self,n=100,vs=18,sh=4,dpi=150):
 
-        df_comp = pd.DataFrame(self.pca.components_,columns=self.df.drop({self.target},axis=1).columns)
-
-        plt.figure(figsize=(vs,sh),dpi=dpi)
-        sns.heatmap(df_comp[:n],annot=True)
-
-    def pca_choose(self,min_n=2,max_n=10):
+    def plot_pca(self,min_n=2,max_n=10):
             
         scaler = StandardScaler()
         pca_X = scaler.fit_transform(self.X)
