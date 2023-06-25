@@ -1,5 +1,6 @@
 import warnings
 from tqdm import tqdm
+import timeit
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
@@ -38,7 +39,7 @@ class classifier_choose():
         self.models_dic_base = {'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
         'XGBClassifier':XGBClassifier(),'SVC':SVC(),'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier()}
 
-        self.model_dict_for_grid = {
+        self.models_dic_grid = {
 
             RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
@@ -52,13 +53,13 @@ class classifier_choose():
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
 
-        self.model_dict_for_random = {
+        self.models_dic_random = {
 
             RandomForestClassifier() : 
-            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight],'max_depth':[1,2,3,4,5,6,7,8,9,10]},
+            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight],'max_depth':range(1, 10, 1)},
 
             GradientBoostingClassifier() : 
-            {'n_estimators': range(64, 128, 1)},
+            {'n_estimators': range(64, 128, 8)},
 
             XGBClassifier() :
             {'max_depth': [3, 4, 5, 6, 7],'eta': np.logspace(np.log10(0.1), np.log10(4.0), num=10),
@@ -79,6 +80,8 @@ class classifier_choose():
 
     def split_data(self,valid = 0.15,test=0.15,stratify=None):
 
+        start_time = timeit.default_timer()
+
         if stratify:
             X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test, stratify=self.y)
             self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid,stratify=y)
@@ -87,18 +90,25 @@ class classifier_choose():
             X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
             self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
     def preprocessing(self,mode='StandardScaler',n_components=2):
 
+        start_time = timeit.default_timer()
+
         if mode=='MinMaxScaler':
 
-            self.standard_mark = 'on'
+            self.minmax_mark = 'on'
+            self.standard_mark = 'off'
+            self.pca_mark = 'off'
             scaler = MinMaxScaler()
 
         if mode=='StandardScaler':
 
+            self.minmax_mark = 'off'
             self.standard_mark = 'on'
+            self.pca_mark = 'off'
             scaler = StandardScaler()
 
         if mode=='MinMaxScaler' or mode=='StandardScaler':
@@ -111,6 +121,8 @@ class classifier_choose():
                 
         if mode=='PCA':
 
+            self.minmax_mark = 'off'
+            self.standard_mark = 'off'
             self.pca_mark = 'on'
 
             scaler = StandardScaler()
@@ -130,9 +142,10 @@ class classifier_choose():
             self.scaler = scaler
             self.pca = pca
 
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
-    def preanalize(self,alpha=0.5):
+    def preanalize(self,alpha=0.5,bins=20):
 
         # correlation plot
         corr_df = pd.DataFrame(self.df).corr()
@@ -148,7 +161,7 @@ class classifier_choose():
             cluster_counts = pd.DataFrame(self.df)[f'{self.target}'].value_counts()
             ax2.pie(cluster_counts, labels=cluster_counts.index, autopct='%1.1f%%')
         else:
-            sns.histplot(data=pd.DataFrame(self.df), x=f'{self.target}', kde=True, color='green', bins=20, ax=ax2)
+            sns.histplot(data=pd.DataFrame(self.df), x=f'{self.target}', kde=True, color='green', bins=bins, ax=ax2)
 
         ax2.set_title(f"{self.target} Distribution")
         ax2.set_xlabel(f"{self.target}")
@@ -176,6 +189,7 @@ class classifier_choose():
 
     def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=1,tree_only=False):
 
+        start_time = timeit.default_timer()
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -183,9 +197,9 @@ class classifier_choose():
         self.ensemble_models = {}
 
         if tuner == "GridSearchCV":
-            model_dict_for_tuner = self.model_dict_for_grid
+            model_dict_for_tuner = self.models_dic_grid
         if tuner == "RandomizedSearchCV" or tuner == 'default':
-            model_dict_for_tuner = self.model_dict_for_random
+            model_dict_for_tuner = self.models_dic_random
 
         for idx, (key, value) in enumerate(tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models")):
 
@@ -217,20 +231,22 @@ class classifier_choose():
         else:
             self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_df_ensamble.iloc[:, :6]
 
     def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
 
+        start_time = timeit.default_timer()
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
         model = self.models_dic_base[estimator]
 
-        index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_random.keys()))}
-        parameter_dic_random = self.model_dict_for_random[list(self.model_dict_for_random.keys())[index_for_params_random[estimator]]]
+        index_for_params_random = {key.__class__.__name__: index for index, key in enumerate(list(self.models_dic_random.keys()))}
+        parameter_dic_random = self.models_dic_random[list(self.models_dic_random.keys())[index_for_params_random[estimator]]]
 
-        index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.model_dict_for_grid.keys()))}
-        parameter_dic_grid = self.model_dict_for_grid[list(self.model_dict_for_grid.keys())[index_for_params_grid[estimator]]]
+        index_for_params_grid = {key.__class__.__name__: index for index, key in enumerate(list(self.models_dic_grid.keys()))}
+        parameter_dic_grid = self.models_dic_grid[list(self.models_dic_grid.keys())[index_for_params_grid[estimator]]]
 
         if mode == 'set_manual':
             search = model.set_params(**params)
@@ -250,10 +266,12 @@ class classifier_choose():
         search.fit(self.X_train, self.y_train)
         self.basemodel_model = search
 
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(search).iloc[:, :6]
 
     def voting(self,mode='hard'):
 
+        start_time = timeit.default_timer()
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -264,10 +282,13 @@ class classifier_choose():
             self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
 
         self.voting_model.fit(self.X_train,self.y_train)
+
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(self.voting_model)
 
     def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
 
+        start_time = timeit.default_timer()
         warnings.filterwarnings('ignore')
         warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -294,9 +315,12 @@ class classifier_choose():
             self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
             self.ada_model.fit(self.X_train, self.y_train)
 
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(self.ada_model)
 
-    def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1):
+    def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,metric='accuracy'):
+
+        start_time = timeit.default_timer()
 
         test_error_rates = []
 
@@ -349,14 +373,28 @@ class classifier_choose():
 
                 tuning_model.fit(self.X_train, self.y_train) 
                 y_pred_test = tuning_model.predict(self.X_valid)
-                test_error = 1 - accuracy_score(self.y_valid, y_pred_test)
-                test_error_rates.append(test_error)
+
+                if metric == 'accuracy':
+                    metric_score = accuracy_score(self.y_valid, y_pred_test)
+
+                if metric == 'precision':
+                    metric_score = precision_score(self.y_valid, y_pred_test)
+
+                if metric == 'recall':
+                    metric_score = recall_score(self.y_valid, y_pred_test)
+
+                if metric == 'f1':
+                    metric_score = f1_score(self.y_valid, y_pred_test)
+
+                test_error_rates.append(metric_score)
 
             plt.plot(np.arange(min_n, max_n, step), test_error_rates, label='Test Error')
             plt.legend()
-            plt.ylabel('Error Rate')
-            plt.xlabel("Target value")
+            plt.ylabel(f'{metric}')
+            plt.xlabel(f'{target}')
             plt.show()
+
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
 
     def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
@@ -487,6 +525,9 @@ class classifier_choose():
 
         if estimator_from == 'ada':
             model = self.ada_model
+
+        if estimator_from == 'tuning':
+            model = self.tuning_model
 
         y_pred = model.predict(self.X_test)
         cm = confusion_matrix(self.y_test, y_pred)
