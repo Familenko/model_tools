@@ -36,21 +36,22 @@ class classifier_choose():
         self.X = self.df.drop({self.target},axis=1)
         self.y = self.df[self.target]
 
-        self.models_dic_base = {'DecisionTreeClassifier':DecisionTreeClassifier(),'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
-        'XGBClassifier':XGBClassifier(),'SVC':SVC(probability=probability),'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier()}
+        self.models_dic_base = {'DecisionTreeClassifier':DecisionTreeClassifier(),'RandomForestClassifier':RandomForestClassifier(class_weight=None),
+        'GradientBoostingClassifier':GradientBoostingClassifier(),'XGBClassifier':XGBClassifier(),'SVC':SVC(probability=probability),
+        'LogisticRegression':LogisticRegression(class_weight=None),'KNeighborsClassifier':KNeighborsClassifier()}
 
         self.models_dic_grid = {
 
             DecisionTreeClassifier() : {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"]},
-            RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
+            RandomForestClassifier(class_weight=None) : {'n_estimators': [64, 100, 128]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
             XGBClassifier() :{'max_depth': [3, 5, 7],'eta': np.logspace(np.log10(0.1), np.log10(3.0), num=3),
             'subsample': np.linspace(0.1, 0.5, 3),'min_split_loss': [ 0.1, 0.2, 0.3],
             'alpha': [ 0.01, 0.1, 1],'lambda': [ 0.01, 0.1, 1],'min_child_weight': [1, 5, 10],
             'booster': ['gbtree', 'gblinear']},
             SVC(probability=probability) : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
-            LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
-            'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
+            LogisticRegression(class_weight=None) : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
+            'solver': ['lbfgs', 'sag', 'saga']},
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
 
@@ -59,8 +60,8 @@ class classifier_choose():
             DecisionTreeClassifier() : 
             {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"], 'max_depth' : range(1,20)},
 
-            RandomForestClassifier() : 
-            {'n_estimators': range(64, 128, 1),'class_weight': [class_weight],'max_depth':range(1, 10, 1)},
+            RandomForestClassifier(class_weight=None) : 
+            {'n_estimators': range(64, 128, 1),'max_depth':range(1, 10, 1)},
 
             GradientBoostingClassifier() : 
             {'n_estimators': range(64, 128, 8)},
@@ -74,17 +75,26 @@ class classifier_choose():
             SVC(probability=probability) : 
             {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
 
-            LogisticRegression() : 
+            LogisticRegression(class_weight=None) : 
             {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=10),
             'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
-            'class_weight': [class_weight],'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
+            'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
 
             KNeighborsClassifier() : 
             {'n_neighbors' : range(1, 30, 1), 'weights' : ['uniform', 'distance']}}
 
-    def split_data(self,valid = 0.15,test=0.15,stratify=None):
+    def elapsed_time_decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = timeit.default_timer()
+            warnings.filterwarnings('ignore')
+            warnings.simplefilter(action='ignore', category=FutureWarning)
+            result = func(*args, **kwargs)
+            elapsed_time = round(timeit.default_timer() - start_time, 2)
+            print("Elapsed time:", elapsed_time)
+            return result
+        return wrapper
 
-        start_time = timeit.default_timer()
+    def split_data(self,valid = 0.15,test=0.15,stratify=None):
 
         if stratify:
             X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test, stratify=self.y)
@@ -94,12 +104,10 @@ class classifier_choose():
             X, self.X_test, y, self.y_test = train_test_split(self.X, self.y, test_size=test)
             self.X_train, self.X_valid, self.y_train, self.y_valid = train_test_split(X, y, test_size=valid)
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
+    @elapsed_time_decorator
     def preprocessing(self,mode='StandardScaler',n_components=2):
-
-        start_time = timeit.default_timer()
 
         if mode=='MinMaxScaler':
 
@@ -146,7 +154,6 @@ class classifier_choose():
             self.scaler = scaler
             self.pca = pca
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.X_train, self.X_valid, self.X_test, self.y_train, self.y_valid, self.y_test
 
     def preanalize(self,alpha=0.5,bins=20):
@@ -191,11 +198,8 @@ class classifier_choose():
         plt.ylabel('Second Principal Component')
         plt.show()
 
+    @elapsed_time_decorator
     def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=1,tree_only=False):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
@@ -235,28 +239,20 @@ class classifier_choose():
         else:
             self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_df_ensamble.iloc[:, :6]
 
-    def voting(self,voting='hard'):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
+    @elapsed_time_decorator
+    def voting(self,voting='soft'):
 
         self.voting_model = VotingClassifier(estimators=[(key, value.best_estimator_) if hasattr(value, 'best_estimator_')
         else (key, value) for key, value in self.ensemble_models.items()],voting=voting)
 
         self.voting_model.fit(self.X_train,self.y_train)
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(self.voting_model)
 
+    @elapsed_time_decorator
     def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         model = self.models_dic_base[estimator]
 
@@ -268,46 +264,36 @@ class classifier_choose():
 
         if mode == 'set_manual':
             search = model.set_params(**params)
-
         if mode == 'set_grid':
             search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid={**params},scoring=scoring)
-
         if mode == 'auto_grid':
             search = GridSearchCV(model,cv=cv,n_jobs=n_jobs,param_grid=parameter_dic_grid,scoring=scoring)
-
         if mode == 'set_random':
             search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions={**params},scoring=scoring,n_iter=n_iter)
-
         if mode == 'auto_random':
             search = RandomizedSearchCV(model,cv=cv,n_jobs=n_jobs,param_distributions=parameter_dic_random,scoring=scoring,n_iter=n_iter)
 
         search.fit(self.X_train, self.y_train)
         self.basemodel_model = search
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(search).iloc[:, :6]
 
+    @elapsed_time_decorator
     def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,metric='accuracy'):
-
-        start_time = timeit.default_timer()
 
         test_error_rates = []
 
         if estimator_from == 'default':
             tuning_model = self.models_dic_base[estimator]
-
         if estimator_from == 'ensemble':
             tuning_model = self.ensemble_models[estimator].best_estimator_
             params = self.ensemble_models[estimator].best_params_
-
         if estimator_from == 'basemodel':
             tuning_model = self.basemodel_model.best_estimator_
             params = self.basemodel_model.best_params_
-
         if estimator_from == 'ada':
             tuning_model = self.ada_model
             params = self.ada_model.get_params()
-
         if estimator_from == 'bagging':
             tuning_model = self.bagging_model
             params = self.bagging_model.get_params()
@@ -347,13 +333,10 @@ class classifier_choose():
 
                 if metric == 'accuracy':
                     metric_score = accuracy_score(self.y_valid, y_pred_test)
-
                 if metric == 'precision':
                     metric_score = precision_score(self.y_valid, y_pred_test)
-
                 if metric == 'recall':
                     metric_score = recall_score(self.y_valid, y_pred_test)
-
                 if metric == 'f1':
                     metric_score = f1_score(self.y_valid, y_pred_test)
 
@@ -365,29 +348,19 @@ class classifier_choose():
             plt.xlabel(f'{target}')
             plt.show()
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
-
+    @elapsed_time_decorator
     def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='default',estimator='DecisionTreeClassifier'):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         if estimator_from == 'default':
             weak_estimator = self.models_dic_base[estimator]
-
         if estimator_from == 'ensemble':
             weak_estimator = self.ensemble_models[estimator].best_estimator_
-
         if estimator_from == 'voting':
             weak_estimator = self.voting_model
-
         if estimator_from == 'basemodel':
             weak_estimator = self.basemodel_model.best_estimator_
-
         if estimator_from == 'tuning':
             weak_estimator = self.tuning_model
-
         if estimator_from == 'bagging':
             weak_estimator = self.bagging_model
 
@@ -399,30 +372,21 @@ class classifier_choose():
             self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
             self.ada_model.fit(self.X_train, self.y_train)
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(self.ada_model)
 
+    @elapsed_time_decorator
     def bagging(self,estimator_from='default',estimator='DecisionTreeClassifier',n_estimators=500,max_samples=0.1,bootstrap=True,n_jobs=1,oob_score=True,max_features=1.0,bootstrap_features=True):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
 
         if estimator_from == 'default':
             weak_estimator = self.models_dic_base[estimator]
-
         if estimator_from == 'ensemble':
             weak_estimator = self.ensemble_models[estimator].best_estimator_
-
         if estimator_from == 'voting':
             weak_estimator = self.voting_model
-
         if estimator_from == 'basemodel':
             weak_estimator = self.basemodel_model.best_estimator_
-
         if estimator_from == 'tuning':
             weak_estimator = self.tuning_model
-
         if estimator_from == 'ada':
             weak_estimator = self.ada_model
 
@@ -430,7 +394,6 @@ class classifier_choose():
             bootstrap=bootstrap,n_jobs=n_jobs,oob_score=oob_score,max_features=max_features,bootstrap_features=bootstrap_features)
         self.bagging_model.fit(self.X_train,self.y_train)
 
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         print(f'oob_score - {self.bagging_model.oob_score_}')
         return self.result_test_df(self.bagging_model)
 
@@ -438,7 +401,6 @@ class classifier_choose():
 
         if estimator_from == 'ensemble':
             model = self.ensemble_models[estimator]
-
         if estimator_from == 'basemodel':
             model = self.basemodel_model
 
@@ -486,6 +448,7 @@ class classifier_choose():
             result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),model.cv_results_['mean_fit_time'].sum(),
                 accuracy_valid,precision_valid,recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
                 index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+
         except AttributeError:
             result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.get_params(),'|',accuracy_valid,precision_valid,
                 recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
@@ -499,19 +462,14 @@ class classifier_choose():
 
         if estimator_from == 'ensemble':
             model = self.ensemble_models[estimator]
-
         if estimator_from == 'voting':
             model = self.voting_model
-
         if estimator_from == 'basemodel':
             model = self.basemodel_model
-
         if estimator_from == 'ada':
             model = self.ada_model
-
         if estimator_from == 'bagging':
             model = self.bagging_model
-
         if estimator_from == 'tuning':
             model = self.tuning_model
 
@@ -523,47 +481,44 @@ class classifier_choose():
 
         return self.build_pipe
  
-    def pca_heat(self,n=100,vs=18,sh=4,dpi=150):
+    def heat_pca(self,n=100,vs=18,sh=4,dpi=150):
 
         df_comp = pd.DataFrame(self.pca.components_,columns=self.df.drop({self.target},axis=1).columns)
 
         plt.figure(figsize=(vs,sh),dpi=dpi)
         sns.heatmap(df_comp[:n],annot=True)
 
-    def plot_trees(self,dpi=300,criterion='gini',max_depth=2,min_samples_split=2,min_samples_leaf=1,min_weight_fraction_leaf=0,max_leaf_nodes=None,min_impurity_decrease=0.0,class_weight=None,ccp_alpha=0.0):
+    def plot_tree(self,params={'max_depth':3},dpi=300,save=False):
 
-        tree = DecisionTreeClassifier(max_depth=max_depth,criterion=criterion,min_samples_split=min_samples_split,
-            min_samples_leaf=min_samples_leaf,min_weight_fraction_leaf=min_weight_fraction_leaf,max_leaf_nodes=max_leaf_nodes,
-            min_impurity_decrease=min_impurity_decrease,class_weight=class_weight,ccp_alpha=ccp_alpha)
+        tree = DecisionTreeClassifier()
+        tree.set_params(**params)
         tree.fit(self.X_train,self.y_train)
 
-        self.plot_trees_df = pd.DataFrame(index=self.X_train.columns,data=tree.feature_importances_,columns=['Feature Importance']).sort_values('Feature Importance',ascending=False)
+        self.plot_tree_df = pd.DataFrame(index=self.X_train.columns,data=tree.feature_importances_,
+            columns=['Feature Importance']).sort_values('Feature Importance',ascending=False)
 
         plt.figure(figsize=(12,8),dpi=dpi)
         class_names = [str(cls) for cls in self.y.unique()]
         plot_tree(tree,filled=True,feature_names=self.X_train.columns,proportion=True,rounded=True,precision=2,
             class_names=class_names,label='root',);
-        plt.savefig("decision_tree.png")
 
-        return self.plot_trees_df
+        if save:
+            plt.savefig("plot_tree.png")
+
+        return self.plot_tree_df
 
     def plot_mat(self,estimator_from='voting',estimator=None):   
 
         if estimator_from == 'ensemble':
             model = self.ensemble_models[estimator]
-
         if estimator_from == 'voting':
             model = self.voting_model
-
         if estimator_from == 'basemodel':
             model = self.basemodel_model
-
         if estimator_from == 'ada':
             model = self.ada_model
-
         if estimator_from == 'bagging':
             model = self.bagging_model
-
         if estimator_from == 'tuning':
             model = self.tuning_model
 
