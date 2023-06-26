@@ -6,7 +6,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
@@ -24,7 +24,7 @@ from sklearn.metrics import confusion_matrix, classification_report, accuracy_sc
 
 class classifier_choose():
     
-    def __init__(self,target,df,class_weight=None):
+    def __init__(self,target,df,class_weight=None,probability=True):
 
         self.df = df
         self.target = target
@@ -36,24 +36,28 @@ class classifier_choose():
         self.X = self.df.drop({self.target},axis=1)
         self.y = self.df[self.target]
 
-        self.models_dic_base = {'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
-        'XGBClassifier':XGBClassifier(),'SVC':SVC(),'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier()}
+        self.models_dic_base = {'DecisionTreeClassifier':DecisionTreeClassifier(),'RandomForestClassifier':RandomForestClassifier(),'GradientBoostingClassifier':GradientBoostingClassifier(),
+        'XGBClassifier':XGBClassifier(),'SVC':SVC(probability=probability),'LogisticRegression':LogisticRegression(),'KNeighborsClassifier':KNeighborsClassifier()}
 
         self.models_dic_grid = {
 
+            DecisionTreeClassifier() : {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"]},
             RandomForestClassifier() : {'n_estimators': [64, 100, 128],'class_weight': [class_weight]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
             XGBClassifier() :{'max_depth': [3, 5, 7],'eta': np.logspace(np.log10(0.1), np.log10(3.0), num=3),
             'subsample': np.linspace(0.1, 0.5, 3),'min_split_loss': [ 0.1, 0.2, 0.3],
             'alpha': [ 0.01, 0.1, 1],'lambda': [ 0.01, 0.1, 1],'min_child_weight': [1, 5, 10],
             'booster': ['gbtree', 'gblinear']},
-            SVC() : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
+            SVC(probability=probability) : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
             LogisticRegression() : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
             'solver': ['lbfgs', 'sag', 'saga'],'class_weight': [class_weight]},
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
 
         self.models_dic_random = {
+
+            DecisionTreeClassifier() : 
+            {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"], 'max_depth' : range(1,20)},
 
             RandomForestClassifier() : 
             {'n_estimators': range(64, 128, 1),'class_weight': [class_weight],'max_depth':range(1, 10, 1)},
@@ -67,7 +71,7 @@ class classifier_choose():
             'alpha': [0, 0.001, 0.01, 0.1, 1],'lambda': [0, 0.001, 0.01, 0.1, 1],
             'min_child_weight': [1, 3, 5, 7, 10],'booster': ['gbtree', 'gblinear']},
 
-            SVC() : 
+            SVC(probability=probability) : 
             {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
 
             LogisticRegression() : 
@@ -203,7 +207,7 @@ class classifier_choose():
 
         for idx, (key, value) in enumerate(tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models")):
 
-            if tree_only and idx >= 3:
+            if tree_only and idx >= 4:
                 break
 
             ensemble_model_name = key.__class__.__name__
@@ -227,12 +231,26 @@ class classifier_choose():
         self.result_df_ensamble = self.result_df_ensamble.transpose()
 
         if tree_only:
-            self.result_df_ensamble.index = list(self.models_dic_base.keys())[:3]
+            self.result_df_ensamble.index = list(self.models_dic_base.keys())[:4]
         else:
             self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
         print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_df_ensamble.iloc[:, :6]
+
+    def voting(self,voting='hard'):
+
+        start_time = timeit.default_timer()
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        self.voting_model = VotingClassifier(estimators=[(key, value.best_estimator_) if hasattr(value, 'best_estimator_')
+        else (key, value) for key, value in self.ensemble_models.items()],voting=voting)
+
+        self.voting_model.fit(self.X_train,self.y_train)
+
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
+        return self.result_test_df(self.voting_model)
 
     def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None):
 
@@ -269,55 +287,6 @@ class classifier_choose():
         print("Elapsed time:", round(timeit.default_timer() - start_time,2))
         return self.result_test_df(search).iloc[:, :6]
 
-    def voting(self,mode='hard'):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        try:
-            self.voting_model = VotingClassifier(estimators=[(key,value.best_estimator_) for key,value in self.ensemble_models.items()],voting = mode)
-
-        except AttributeError:
-            self.voting_model = VotingClassifier(estimators=[(key,value) for key,value in self.ensemble_models.items()],voting = mode)
-
-        self.voting_model.fit(self.X_train,self.y_train)
-
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
-        return self.result_test_df(self.voting_model)
-
-    def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='ensemble',estimator='LogisticRegression'):
-
-        start_time = timeit.default_timer()
-        warnings.filterwarnings('ignore')
-        warnings.simplefilter(action='ignore', category=FutureWarning)
-
-        if estimator_from == 'default':
-            weak_estimator = self.models_dic_base[estimator]
-
-        if estimator_from == 'ensemble':
-            weak_estimator = self.ensemble_models[estimator].best_estimator_
-
-        if estimator_from == 'voting':
-            weak_estimator = self.voting_model
-
-        if estimator_from == 'basemodel':
-            weak_estimator = self.basemodel_model.best_estimator_
-
-        if estimator_from == 'tuning':
-            weak_estimator = self.tuning_model
-
-        try:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        except:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
-            self.ada_model.fit(self.X_train, self.y_train)
-
-        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
-        return self.result_test_df(self.ada_model)
-
     def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,metric='accuracy'):
 
         start_time = timeit.default_timer()
@@ -339,11 +308,14 @@ class classifier_choose():
             tuning_model = self.ada_model
             params = self.ada_model.get_params()
 
+        if estimator_from == 'bagging':
+            tuning_model = self.bagging_model
+            params = self.bagging_model.get_params()
+
         if params and target in params:
             del params[target]
 
         if set_target:
-
             params_dict = {target : set_target}
             if params:
                 params_dict.update(params)
@@ -355,7 +327,6 @@ class classifier_choose():
             return self.result_test_df(tuning_model).iloc[:, :6]
 
         else:
-
             for i in tqdm(np.arange(min_n, max_n, step),desc="Checking model"):
 
                 try:
@@ -396,19 +367,80 @@ class classifier_choose():
 
         print("Elapsed time:", round(timeit.default_timer() - start_time,2))
 
+    def ada(self,n_estimators=50,learning_rate=1.0,estimator_from='default',estimator='DecisionTreeClassifier'):
+
+        start_time = timeit.default_timer()
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        if estimator_from == 'default':
+            weak_estimator = self.models_dic_base[estimator]
+
+        if estimator_from == 'ensemble':
+            weak_estimator = self.ensemble_models[estimator].best_estimator_
+
+        if estimator_from == 'voting':
+            weak_estimator = self.voting_model
+
+        if estimator_from == 'basemodel':
+            weak_estimator = self.basemodel_model.best_estimator_
+
+        if estimator_from == 'tuning':
+            weak_estimator = self.tuning_model
+
+        if estimator_from == 'bagging':
+            weak_estimator = self.bagging_model
+
+        try:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        except:
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model.fit(self.X_train, self.y_train)
+
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
+        return self.result_test_df(self.ada_model)
+
+    def bagging(self,estimator_from='default',estimator='DecisionTreeClassifier',n_estimators=500,max_samples=0.1,bootstrap=True,n_jobs=1,oob_score=True,max_features=1.0,bootstrap_features=True):
+
+        start_time = timeit.default_timer()
+        warnings.filterwarnings('ignore')
+        warnings.simplefilter(action='ignore', category=FutureWarning)
+
+        if estimator_from == 'default':
+            weak_estimator = self.models_dic_base[estimator]
+
+        if estimator_from == 'ensemble':
+            weak_estimator = self.ensemble_models[estimator].best_estimator_
+
+        if estimator_from == 'voting':
+            weak_estimator = self.voting_model
+
+        if estimator_from == 'basemodel':
+            weak_estimator = self.basemodel_model.best_estimator_
+
+        if estimator_from == 'tuning':
+            weak_estimator = self.tuning_model
+
+        if estimator_from == 'ada':
+            weak_estimator = self.ada_model
+
+        self.bagging_model = BaggingClassifier(weak_estimator,n_estimators=n_estimators,max_samples=max_samples,
+            bootstrap=bootstrap,n_jobs=n_jobs,oob_score=oob_score,max_features=max_features,bootstrap_features=bootstrap_features)
+        self.bagging_model.fit(self.X_train,self.y_train)
+
+        print("Elapsed time:", round(timeit.default_timer() - start_time,2))
+        print(f'oob_score - {self.bagging_model.oob_score_}')
+        return self.result_test_df(self.bagging_model)
+
     def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
 
         if estimator_from == 'ensemble':
             model = self.ensemble_models[estimator]
 
-        if estimator_from == 'voting':
-            model = self.voting_model
-
         if estimator_from == 'basemodel':
             model = self.basemodel_model
-
-        if estimator_from == 'ada':
-            model = self.ada_model
 
         results = pd.DataFrame(model.cv_results_)
         parameter_names = first_key = list(results['params'][0].keys())
@@ -477,6 +509,9 @@ class classifier_choose():
         if estimator_from == 'ada':
             model = self.ada_model
 
+        if estimator_from == 'bagging':
+            model = self.bagging_model
+
         if estimator_from == 'tuning':
             model = self.tuning_model
 
@@ -525,6 +560,9 @@ class classifier_choose():
 
         if estimator_from == 'ada':
             model = self.ada_model
+
+        if estimator_from == 'bagging':
+            model = self.bagging_model
 
         if estimator_from == 'tuning':
             model = self.tuning_model
