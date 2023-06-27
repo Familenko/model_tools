@@ -6,7 +6,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, ExtraTreesClassifier
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
@@ -36,31 +36,36 @@ class classifier_choose():
         self.X = self.df.drop({self.target},axis=1)
         self.y = self.df[self.target]
 
-        self.models_dic_base = {'DecisionTreeClassifier':DecisionTreeClassifier(),'RandomForestClassifier':RandomForestClassifier(class_weight=None),
-        'GradientBoostingClassifier':GradientBoostingClassifier(),'XGBClassifier':XGBClassifier(),'SVC':SVC(probability=probability),
-        'LogisticRegression':LogisticRegression(class_weight=None),'KNeighborsClassifier':KNeighborsClassifier()}
+        self.models_dic_base = {'ExtraTreesClassifier':ExtraTreesClassifier(class_weight=class_weight),'DecisionTreeClassifier':DecisionTreeClassifier(),
+        'RandomForestClassifier':RandomForestClassifier(class_weight=class_weight),'GradientBoostingClassifier':GradientBoostingClassifier(),
+        'XGBClassifier':XGBClassifier(),'SVC':SVC(probability=probability),'LogisticRegression':LogisticRegression(class_weight=class_weight),
+        'KNeighborsClassifier':KNeighborsClassifier()}
 
         self.models_dic_grid = {
 
+            ExtraTreesClassifier(class_weight=class_weight) : {'n_estimators' : [100,200,500], 'max_depth' : [1,10,20,None],'max_features':["sqrt", "log2", None]},
             DecisionTreeClassifier() : {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"]},
-            RandomForestClassifier(class_weight=None) : {'n_estimators': [64, 100, 128]},
+            RandomForestClassifier(class_weight=class_weight) : {'n_estimators': [64, 100, 128]},
             GradientBoostingClassifier() : {'n_estimators': [64, 100, 128]},
             XGBClassifier() :{'max_depth': [3, 5, 7],'eta': np.logspace(np.log10(0.1), np.log10(3.0), num=3),
             'subsample': np.linspace(0.1, 0.5, 3),'min_split_loss': [ 0.1, 0.2, 0.3],
             'alpha': [ 0.01, 0.1, 1],'lambda': [ 0.01, 0.1, 1],'min_child_weight': [1, 5, 10],
             'booster': ['gbtree', 'gblinear']},
             SVC(probability=probability) : {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
-            LogisticRegression(class_weight=None) : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
+            LogisticRegression(class_weight=class_weight) : {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=4),
             'solver': ['lbfgs', 'sag', 'saga']},
             KNeighborsClassifier() : {'n_neighbors' : [1,2,4,8,16,32], 'weights' : ['uniform', 'distance']}}
 
 
         self.models_dic_random = {
 
+            ExtraTreesClassifier(class_weight=class_weight) : 
+            {'n_estimators' : range(100,500), 'max_depth' : range(1,50),'max_features':["sqrt", "log2", None]},
+
             DecisionTreeClassifier() : 
             {'splitter' : ["best", "random"], 'max_features' : ["auto", "sqrt", "log2"], 'max_depth' : range(1,20)},
 
-            RandomForestClassifier(class_weight=None) : 
+            RandomForestClassifier(class_weight=class_weight) : 
             {'n_estimators': range(64, 128, 1),'max_depth':range(1, 10, 1)},
 
             GradientBoostingClassifier() : 
@@ -75,7 +80,7 @@ class classifier_choose():
             SVC(probability=probability) : 
             {'kernel': ['linear', 'rbf'], 'C': [0.1, 1, 10],'gamma': ['scale', 'auto']},
 
-            LogisticRegression(class_weight=None) : 
+            LogisticRegression(class_weight=class_weight) : 
             {'penalty': ['l1', 'l2','elasticnet'],'C': np.logspace(np.log10(0.01), np.log10(100.0), num=10),
             'solver': ['lbfgs', 'liblinear', 'newton-cg', 'newton-cholesky', 'sag', 'saga'],
             'fit_intercept' : [True,False], 'max_iter' : [100,200,500]},
@@ -199,20 +204,27 @@ class classifier_choose():
         plt.show()
 
     @elapsed_time_decorator
-    def ensemble(self,tuner='RandomizedSearchCV',cv=5,scoring='accuracy',n_iter=5,n_jobs=1,tree_only=False):
+    def ensemble(self,tuner='default',estimators=None,cv=5,scoring='accuracy',n_iter=5,n_jobs=2):
 
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
+        result_df_ensamble_index_limit = len(self.models_dic_base)
+
 
         if tuner == "GridSearchCV":
             model_dict_for_tuner = self.models_dic_grid
         if tuner == "RandomizedSearchCV" or tuner == 'default':
             model_dict_for_tuner = self.models_dic_random
 
-        for idx, (key, value) in enumerate(tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models")):
+        if estimators == 'tree_only':
+            estimators = list(self.models_dic_base.keys())[:5]
+        if estimators == 'no_tree':
+            estimators = list(self.models_dic_base.keys())[5:]
+        if estimators:
+            model_dict_for_tuner = {key: model_dict_for_tuner[key] for key,value in model_dict_for_tuner.items() if key.__class__.__name__ in estimators}
+            result_df_ensamble_index_limit = len(estimators)
 
-            if tree_only and idx >= 4:
-                break
+        for key, value in tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models"):
 
             ensemble_model_name = key.__class__.__name__
             print(f"Model: {ensemble_model_name}")
@@ -233,11 +245,6 @@ class classifier_choose():
             self.result_df_ensamble = pd.concat([self.result_df_ensamble, df_iter_model_ensemble], axis=1)
 
         self.result_df_ensamble = self.result_df_ensamble.transpose()
-
-        if tree_only:
-            self.result_df_ensamble.index = list(self.models_dic_base.keys())[:4]
-        else:
-            self.result_df_ensamble.index = list(self.models_dic_base.keys())
 
         return self.result_df_ensamble.iloc[:, :6]
 
@@ -365,11 +372,11 @@ class classifier_choose():
             weak_estimator = self.bagging_model
 
         try:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
             self.ada_model.fit(self.X_train, self.y_train)
 
         except:
-            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME.R', n_estimators=n_estimators, learning_rate=learning_rate)
+            self.ada_model = AdaBoostClassifier(base_estimator=weak_estimator, algorithm='SAMME', n_estimators=n_estimators, learning_rate=learning_rate)
             self.ada_model.fit(self.X_train, self.y_train)
 
         return self.result_test_df(self.ada_model)
