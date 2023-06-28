@@ -6,7 +6,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier, VotingClassifier, BaggingClassifier, ExtraTreesClassifier
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier,
+    VotingClassifier, BaggingClassifier, ExtraTreesClassifier)
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
@@ -20,9 +21,28 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
 
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score,recall_score, f1_score, roc_auc_score
+from scikitplot.metrics import plot_precision_recall
+
+from sklearn.pipeline import make_pipeline
+from sklearn.base import BaseEstimator, ClassifierMixin
+
 
 class classifier_choose():
+
+    def info(self):
+
+        print(f'''
+        Posible estimator : 
+        ['ExtraTreesClassifier', 'DecisionTreeClassifier', 'RandomForestClassifier',  'SVC',
+        'GradientBoostingClassifier', 'XGBClassifier', 'LogisticRegression', 'KNeighborsClassifier'
+
+        Posible tuner :
+         'GridSearchCV', 'RandomizedSearchCV', 'default'
+
+        Posible metric :
+         'accuracy', 'precision', 'recall', 'f1'
+        ''')
     
     def __init__(self,target,df,class_weight=None,probability=True):
 
@@ -208,8 +228,6 @@ class classifier_choose():
 
         self.result_df_ensamble = pd.DataFrame()
         self.ensemble_models = {}
-        result_df_ensamble_index_limit = len(self.models_dic_base)
-
 
         if tuner == "GridSearchCV":
             model_dict_for_tuner = self.models_dic_grid
@@ -222,7 +240,6 @@ class classifier_choose():
             estimators = list(self.models_dic_base.keys())[5:]
         if estimators:
             model_dict_for_tuner = {key: model_dict_for_tuner[key] for key,value in model_dict_for_tuner.items() if key.__class__.__name__ in estimators}
-            result_df_ensamble_index_limit = len(estimators)
 
         for key, value in tqdm(model_dict_for_tuner.items(), desc="Tuning Ensemble Models"):
 
@@ -246,7 +263,7 @@ class classifier_choose():
 
         self.result_df_ensamble = self.result_df_ensamble.transpose()
 
-        return self.result_df_ensamble.iloc[:, :6]
+        return self.result_df_ensamble.iloc[:, :8]
 
     @elapsed_time_decorator
     def voting(self,voting='soft'):
@@ -283,7 +300,7 @@ class classifier_choose():
         search.fit(self.X_train, self.y_train)
         self.basemodel_model = search
 
-        return self.result_test_df(search).iloc[:, :6]
+        return self.result_test_df(search).iloc[:, :8]
 
     @elapsed_time_decorator
     def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,metric='accuracy'):
@@ -317,7 +334,7 @@ class classifier_choose():
 
             self.tuning_model = tuning_model
 
-            return self.result_test_df(tuning_model).iloc[:, :6]
+            return self.result_test_df(tuning_model).iloc[:, :8]
 
         else:
             for i in tqdm(np.arange(min_n, max_n, step),desc="Checking model"):
@@ -444,22 +461,28 @@ class classifier_choose():
         precision_valid = round(precision_score(self.y_valid, y_pred_valid, average='macro'),2)
         recall_valid = round(recall_score(self.y_valid, y_pred_valid, average='macro'),2)
         f1_valid = round(f1_score(self.y_valid, y_pred_valid, average='macro'),2)
+        variance_valid = round(np.var(y_pred_valid),2)
+        roc_auc_score_valid = round(roc_auc_score(self.y_valid, y_pred_valid),2)
 
         y_pred_test = model.predict(self.X_test)
         accuracy_test = round(accuracy_score(self.y_test, y_pred_test),2)
         precision_test = round(precision_score(self.y_test, y_pred_test, average='macro'),2)
         recall_test = round(recall_score(self.y_test, y_pred_test, average='macro'),2)
         f1_test = round(f1_score(self.y_test, y_pred_test, average='macro'),2)
+        variance_test = round(np.var(y_pred_test),2)
+        roc_auc_score_test = round(roc_auc_score(self.y_test, y_pred_test),2)
 
         try:
             result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.best_estimator_.get_params(),model.cv_results_['mean_fit_time'].sum(),
-                accuracy_valid,precision_valid,recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+                accuracy_valid,precision_valid,recall_valid,f1_valid,variance_valid,roc_auc_score_valid,accuracy_test,precision_test,recall_test,f1_test,variance_test,roc_auc_score_test]},
+                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','variance_valid','roc_auc_score_valid','accuracy_test',
+                'precision_test','recall_test','f1_test','variance_test','roc_auc_score_test'])
 
         except AttributeError:
             result_test_df = pd.DataFrame({f'{model.__class__.__name__}':[model.get_params(),'|',accuracy_valid,precision_valid,
-                recall_valid,f1_valid,accuracy_test,precision_test,recall_test,f1_test]},
-                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','accuracy_test','precision_test','recall_test','f1_test'])
+                recall_valid,f1_valid,variance_valid,roc_auc_score_valid,accuracy_test,precision_test,recall_test,f1_test,variance_test,roc_auc_score_test]},
+                index=['parameters','building_time','accuracy_valid','precision_valid','recall_valid','f1_valid','variance_valid','roc_auc_score_valid','accuracy_test',
+                'precision_test','recall_test','f1_test','variance_test','roc_auc_score_test'])
 
         result_test_df = result_test_df.transpose()
         
@@ -479,6 +502,8 @@ class classifier_choose():
             model = self.bagging_model
         if estimator_from == 'tuning':
             model = self.tuning_model
+        if estimator_from == 'threshold':
+            model = self.threshold_model
 
         if self.standard_mark == 'on' or self.minmax_mark == 'on':
             self.build_pipe = make_pipeline(self.scaler,model)
@@ -528,15 +553,50 @@ class classifier_choose():
             model = self.bagging_model
         if estimator_from == 'tuning':
             model = self.tuning_model
+        if estimator_from == 'threshold':
+            model = self.threshold_model
 
-        y_pred = model.predict(self.X_test)
-        cm = confusion_matrix(self.y_test, y_pred)
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        classes = model.classes_
-        ax = sns.heatmap(cm, annot=True, xticklabels=classes, yticklabels=classes,cmap='Greens')
-        ax.set(xlabel='Predict', ylabel='Actual')
+        try:
+
+            y_pred = model.predict(self.X_test)
+            cm = confusion_matrix(self.y_test, y_pred)
+            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+            classes = model.classes_
+            ax = sns.heatmap(cm, annot=True, xticklabels=classes, yticklabels=classes,cmap='Greens')
+            ax.set(xlabel='Predict', ylabel='Actual')
+
+        except TypeError:
+
+            y_pred = model.predict(self.X_test)
+            cm = confusion_matrix(self.y_test, y_pred)
+            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+            classes = model.classes_
+            ax = sns.heatmap(cm, annot=True,cmap='Greens')
+            ax.set(xlabel='Predict', ylabel='Actual')
 
         print(classification_report(self.y_test,y_pred))
+
+    def plot_precision_recall(self,estimator_from='voting',estimator=None):
+
+        if estimator_from == 'ensemble':
+            model = self.ensemble_models[estimator]
+        if estimator_from == 'voting':
+            model = self.voting_model
+        if estimator_from == 'basemodel':
+            model = self.basemodel_model
+        if estimator_from == 'ada':
+            model = self.ada_model
+        if estimator_from == 'bagging':
+            model = self.bagging_model
+        if estimator_from == 'tuning':
+            model = self.tuning_model
+        if estimator_from == 'threshold':
+            model = self.threshold_model
+
+        plot_precision_recall(self.y_test, model.predict_proba(self.X_test))
+
+        plt.tight_layout()
+        plt.show()
 
     def plot_pca(self,min_n=2,max_n=10):
             
@@ -555,3 +615,82 @@ class classifier_choose():
         plt.xlabel("Number of Components")
         plt.ylabel("Variance Explained")
         plt.grid(alpha=0.2);
+
+    def threshold(self,estimator_from='basemodel',estimator=None,set_threshold=None,metric='accuracy'):
+
+        if estimator_from == 'default':
+            model = self.models_dic_base[estimator]
+        if estimator_from == 'ensemble':
+            model = self.ensemble_models[estimator].best_estimator_
+        if estimator_from == 'voting':
+            model = self.voting_model
+        if estimator_from == 'basemodel':
+            model = self.basemodel_model.best_estimator_
+        if estimator_from == 'tuning':
+            model = self.tuning_model
+        if estimator_from == 'bagging':
+            model = self.bagging_model
+        if estimator_from == 'ada':
+            model = self.ada_model
+
+        class ThresholdClassifier(BaseEstimator, ClassifierMixin):
+            def __init__(self, threshold=0.5, estimator=None):
+                self.threshold = threshold
+                self.estimator = estimator
+
+            def fit(self, X, y):
+                self.estimator.fit(X, y)
+                return self
+
+            def predict(self, X):
+                return (self.estimator.predict_proba(X)[:, 1] >= self.threshold).astype(int)
+
+            def predict_proba(self, X):
+                return self.estimator.predict_proba(X)
+
+            def get_params(self, deep=True):
+                return {"threshold": self.threshold, "estimator": self.estimator}
+
+            def set_params(self, **parameters):
+                for parameter, value in parameters.items():
+                    setattr(self, parameter, value)
+                return self
+            
+            def classes_(self):
+                return self.estimator.classes_
+
+            def __len__(self):
+                return len(self.estimator.classes_)
+
+        def threshold_function(threshold,estimator):
+            return ThresholdClassifier(threshold,estimator)
+
+        if set_threshold:
+            self.threshold_model = make_pipeline(threshold_function(set_threshold,model))
+            return self.result_test_df(self.threshold_model)
+
+        else:
+
+            test_error_rates = []
+
+            for i in tqdm(np.arange(0.01, 0.99, 0.01),desc="Threshold assesment"):
+                threshold_model = make_pipeline(threshold_function(i,model))
+
+                y_pred_valid = threshold_model.predict(self.X_valid)
+
+                if metric == 'accuracy':
+                    metric_score = accuracy_score(self.y_valid, y_pred_valid)
+                if metric == 'precision':
+                    metric_score = precision_score(self.y_valid, y_pred_valid)
+                if metric == 'recall':
+                    metric_score = recall_score(self.y_valid, y_pred_valid)
+                if metric == 'f1':
+                    metric_score = f1_score(self.y_valid, y_pred_valid)
+
+                test_error_rates.append(metric_score)
+
+            plt.plot(np.arange(0.01, 0.99, 0.01), test_error_rates, label='Threshold assesment')
+            plt.legend()
+            plt.ylabel(f'{metric}')
+            plt.xlabel(f'threshold')
+            plt.show()
