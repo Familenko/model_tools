@@ -1,13 +1,14 @@
 import warnings
 from tqdm import tqdm
 import timeit
+import mplcursors
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier, AdaBoostClassifier,
-    VotingClassifier, BaggingClassifier, ExtraTreesClassifier)
+from sklearn.ensemble import (RandomForestClassifier, GradientBoostingClassifier,
+    AdaBoostClassifier,VotingClassifier, BaggingClassifier, ExtraTreesClassifier)
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
@@ -21,10 +22,10 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
 
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score,recall_score, f1_score, roc_auc_score
+from sklearn.metrics import (confusion_matrix, classification_report,
+    accuracy_score, precision_score,recall_score, f1_score)
 from scikitplot.metrics import plot_precision_recall
 
-from sklearn.pipeline import make_pipeline
 from sklearn.base import BaseEstimator, ClassifierMixin
 
 
@@ -279,7 +280,7 @@ class classifier_choose():
             return self.result_test_df(self.voting_model)
 
     @elapsed_time_decorator
-    def basemodel(self,mode='auto_random',estimator='LogisticRegression',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None,test_on='valid_data'):
+    def basemodel(self,estimator='LogisticRegression',mode='auto_random',params=None,cv=5,scoring='accuracy',n_iter=10,n_jobs=None,test_on='valid_data'):
 
         model = self.models_dic_base[estimator]
 
@@ -309,7 +310,7 @@ class classifier_choose():
             return self.result_test_df(search)
 
     @elapsed_time_decorator
-    def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,metric='accuracy',test_on='valid_data'):
+    def tuning(self,estimator_from='default',estimator='KNeighborsClassifier', target='n_neighbors',set_target=None,params=None, min_n=1, max_n=30,step=1,test_on='valid_data'):
 
         test_error_rates = []
 
@@ -352,14 +353,19 @@ class classifier_choose():
                 return self.result_test_df(tuning_model)
 
         else:
-            for i in tqdm(np.arange(min_n, max_n, step),desc="Checking model"):
 
+            metrics = ['precision', 'recall', 'f1','accuracy']
+            test_error_rates = {metric: [] for metric in metrics}
+
+            fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+            axs = axs.flatten()
+
+            for i in tqdm(np.arange(min_n, max_n, step), desc=f"Checking model for {target}"):
                 try:
                     params_dict = {target: i}
                     if params:
                         params_dict.update(params)
                     tuning_model.set_params(**params_dict)
-
                 except InvalidParameterError:
                     i = i.astype('int')
                     params_dict = {target: i}
@@ -367,24 +373,44 @@ class classifier_choose():
                         params_dict.update(params)
                     tuning_model.set_params(**params_dict)
 
-                tuning_model.fit(self.X_train, self.y_train) 
+                tuning_model.fit(self.X_train, self.y_train)
                 y_pred_valid = tuning_model.predict(self.X_valid)
 
-                if metric == 'accuracy':
-                    metric_score = accuracy_score(self.y_valid, y_pred_valid)
-                if metric == 'precision':
-                    metric_score = precision_score(self.y_valid, y_pred_valid)
-                if metric == 'recall':
-                    metric_score = recall_score(self.y_valid, y_pred_valid)
-                if metric == 'f1':
-                    metric_score = f1_score(self.y_valid, y_pred_valid)
+                metric_score_accuracy = accuracy_score(self.y_valid, y_pred_valid)
+                metric_score_precision = precision_score(self.y_valid, y_pred_valid)
+                metric_score_recall = recall_score(self.y_valid, y_pred_valid)
+                metric_score_f1 = f1_score(self.y_valid, y_pred_valid)
 
-                test_error_rates.append(metric_score)
+                test_error_rates['accuracy'].append(metric_score_accuracy)
+                test_error_rates['precision'].append(metric_score_precision)
+                test_error_rates['recall'].append(metric_score_recall)
+                test_error_rates['f1'].append(metric_score_f1)
 
-            plt.plot(np.arange(min_n, max_n, step), test_error_rates, label='Test Error')
-            plt.legend()
-            plt.ylabel(f'{metric}')
-            plt.xlabel(f'{target}')
+            axs[0].plot(np.arange(min_n, max_n, step), test_error_rates['precision'], label='precision / threshold ratio')
+            axs[0].legend()
+            axs[0].set_ylabel('precision')
+            axs[0].set_xlabel(f'{target}')
+            axs[0].grid(True)
+
+            axs[1].plot(np.arange(min_n, max_n, step), test_error_rates['recall'], label='recall / threshold ratio')
+            axs[1].legend()
+            axs[1].set_ylabel('recall')
+            axs[1].set_xlabel(f'{target}')
+            axs[1].grid(True)
+
+            axs[2].plot(np.arange(min_n, max_n, step), test_error_rates['f1'], label='f1 / threshold ratio')
+            axs[2].legend()
+            axs[2].set_ylabel('f1')
+            axs[2].set_xlabel(f'{target}')
+            axs[2].grid(True)
+
+            axs[3].plot(np.arange(min_n, max_n, step), test_error_rates['accuracy'], label='accuracy / threshold ratio')
+            axs[3].legend()
+            axs[3].set_ylabel('accuracy')
+            axs[3].set_xlabel(f'{target}')
+            axs[3].grid(True)
+
+            plt.tight_layout()
             plt.show()
 
     @elapsed_time_decorator
@@ -447,7 +473,7 @@ class classifier_choose():
         if test_on=='test_data':
             return self.result_test_df(self.bagging_model)
 
-    def threshold(self,estimator_from='default',estimator=None,set_threshold=None,metric='accuracy',test_on='valid_data'):
+    def threshold(self,estimator_from='default',estimator=None,set_threshold=None,test_on='valid_data'):
 
         if estimator_from == 'default':
             model = self.models_dic_base[estimator]
@@ -510,29 +536,40 @@ class classifier_choose():
 
             test_error_rates = []
 
-            for i in tqdm(np.arange(0.01, 0.99, 0.01),desc="Threshold assesment"):
-                threshold_model = make_pipeline(threshold_function(i,model))
+            metrics = ['precision', 'recall', 'f1','accuracy']
 
-                y_pred_valid = threshold_model.predict(self.X_valid)
+            fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+            axs = axs.flatten()
 
-                if metric == 'accuracy':
-                    metric_score = accuracy_score(self.y_valid, y_pred_valid)
-                if metric == 'precision':
-                    metric_score = precision_score(self.y_valid, y_pred_valid)
-                if metric == 'recall':
-                    metric_score = recall_score(self.y_valid, y_pred_valid)
-                if metric == 'f1':
-                    metric_score = f1_score(self.y_valid, y_pred_valid)
+            for idx, metric in enumerate(metrics):
+                test_error_rates = []
 
-                test_error_rates.append(metric_score)
+                for i in tqdm(np.arange(0.01, 0.99, 0.01), desc=f"Threshold assessment for {metric}"):
+                    threshold_model = make_pipeline(threshold_function(i, model))
 
-            plt.plot(np.arange(0.01, 0.99, 0.01), test_error_rates, label='Threshold assesment')
-            plt.legend()
-            plt.ylabel(f'{metric}')
-            plt.xlabel(f'threshold')
+                    y_pred_valid = threshold_model.predict(self.X_valid)
+
+                    if metric == 'accuracy':
+                        metric_score = accuracy_score(self.y_valid, y_pred_valid)
+                    elif metric == 'precision':
+                        metric_score = precision_score(self.y_valid, y_pred_valid)
+                    elif metric == 'recall':
+                        metric_score = recall_score(self.y_valid, y_pred_valid)
+                    elif metric == 'f1':
+                        metric_score = f1_score(self.y_valid, y_pred_valid)
+
+                    test_error_rates.append(metric_score)
+
+                axs[idx].plot(np.arange(0.01, 0.99, 0.01), test_error_rates, label=f'{metric} / threshold ratio')
+                axs[idx].legend()
+                axs[idx].set_ylabel(f'{metric}')
+                axs[idx].set_xlabel(f'threshold')
+                axs[idx].grid(True) 
+
+            plt.tight_layout()
             plt.show()
 
-    def cv_results(self,estimator_from='ensemble',estimator=None,result='df',param=None):
+    def cv_results(self,estimator_from='basemodel',estimator=None,result='df'):
 
         if estimator_from == 'ensemble':
             model = self.ensemble_models[estimator]
@@ -540,30 +577,22 @@ class classifier_choose():
             model = self.basemodel_model
 
         results = pd.DataFrame(model.cv_results_)
-        parameter_names = first_key = list(results['params'][0].keys())
+        parameter_names = list(results['params'][0].keys())
         parameter_names = ['param_' + param for param in parameter_names]
         parameter_names.append('mean_test_score')
         parameter_names.append('std_test_score')
+        parameter_names.append('params')
         results.sort_values(by='mean_test_score', ascending=False, inplace=True)
         results.reset_index(drop=True, inplace=True)
 
         if result == 'df':
-
             return results[parameter_names]
 
         if result == 'plot':
-
             results['mean_test_score'].plot(yerr=[results['std_test_score'], results['std_test_score']], subplots=True)
             plt.ylabel('Mean test score')
             plt.xlabel('Hyperparameter combinations')
-
-        if result == 'summarize_by':
-
-            tmp = pd.concat([
-                results.groupby('param_'+param)['mean_test_score'].mean(),
-                results.groupby('param_'+param)['mean_test_score'].std()], axis=1)
-            tmp.columns = ['mean_test_score', 'std_test_score']
-            return tmp
+            plt.grid(True) 
 
     def result_test_df(self,model):
 
